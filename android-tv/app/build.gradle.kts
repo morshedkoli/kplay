@@ -5,6 +5,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+/**
+ * Reads a build-time value from a Gradle property (`-PsomeName=…` or
+ * gradle.properties) falling back to an environment variable, then to "".
+ * Trailing slashes are stripped so the client can concatenate paths safely.
+ */
+fun resolveConfig(gradleProperty: String, envVar: String): String =
+    (project.findProperty(gradleProperty) as String? ?: System.getenv(envVar) ?: "")
+        .trim()
+        .trimEnd('/')
+
 android {
     namespace = "com.kdrive.tv"
     compileSdk = 34
@@ -15,6 +25,30 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        // Baked-in server config, so an installed APK runs with no setup
+        // screen at all — a TV remote is a miserable way to type a URL and a
+        // random key.
+        //
+        // Values come from -P flags, gradle.properties, or the environment,
+        // in that order. Both default to empty, and when either is empty the
+        // app falls back to asking on first launch — that keeps a plain
+        // `gradlew assembleDebug` working for anyone without the values.
+        //
+        // NOTE: the device key ends up readable inside the APK. Anyone who
+        // gets the file can extract it and reach the server. That is the
+        // trade for zero-setup install; rotate KDRIVE_DEVICE_KEY if an APK
+        // leaks.
+        buildConfigField(
+            "String",
+            "SERVER_URL",
+            "\"${resolveConfig("kdriveServerUrl", "KDRIVE_SERVER_URL")}\"",
+        )
+        buildConfigField(
+            "String",
+            "DEVICE_KEY",
+            "\"${resolveConfig("kdriveDeviceKey", "KDRIVE_DEVICE_KEY")}\"",
+        )
     }
 
     buildTypes {
@@ -34,6 +68,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

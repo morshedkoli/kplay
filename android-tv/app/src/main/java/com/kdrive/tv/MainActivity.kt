@@ -41,11 +41,31 @@ private sealed class AuthState {
     data class LoggedIn(val credentials: Credentials) : AuthState()
 }
 
+/**
+ * Server config compiled into the APK, or null when this build wasn't given
+ * any. When present the app goes straight to the library on first launch —
+ * no setup screen, because entering a URL and a random key on a TV remote is
+ * genuinely painful.
+ *
+ * See app/build.gradle.kts for how the values are supplied at build time.
+ */
+private val bakedInCredentials: Credentials? =
+    if (BuildConfig.SERVER_URL.isNotBlank() && BuildConfig.DEVICE_KEY.isNotBlank()) {
+        Credentials(BuildConfig.SERVER_URL, BuildConfig.DEVICE_KEY)
+    } else {
+        null
+    }
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = Prefs(applicationContext)
-        val authState = prefs.credentials.map { creds ->
+
+        // A baked-in server wins over anything saved: the APK was built for
+        // one specific server, so there is nothing to ask and nothing to
+        // restore.
+        val authState = prefs.credentials.map { saved ->
+            val creds = bakedInCredentials ?: saved
             if (creds != null) AuthState.LoggedIn(creds) else AuthState.LoggedOut
         }
 
