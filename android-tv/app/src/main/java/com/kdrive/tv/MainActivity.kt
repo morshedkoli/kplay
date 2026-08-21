@@ -20,12 +20,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import androidx.tv.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.Credentials
 import com.kdrive.tv.data.Prefs
 import com.kdrive.tv.data.authenticatedImageLoader
-import com.kdrive.tv.ui.BrowseScreen
+import com.kdrive.tv.ui.HomeScreen
 import com.kdrive.tv.ui.DetailScreen
 import com.kdrive.tv.ui.LoginScreen
 import com.kdrive.tv.ui.PlayerScreen
@@ -70,7 +71,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme {
+            MaterialTheme(colorScheme = darkColorScheme()) {
                 val state by authState.collectAsState(initial = AuthState.Loading)
                 val scope = rememberCoroutineScope()
                 var loginError by remember { mutableStateOf<String?>(null) }
@@ -115,7 +116,7 @@ private fun AppNav(credentials: Credentials) {
 
     NavHost(navController = navController, startDestination = "browse") {
         composable("browse") {
-            BrowseScreen(
+            HomeScreen(
                 api = api,
                 imageLoader = imageLoader,
                 onSelect = { item -> navController.navigate("detail/${item.id}") },
@@ -129,6 +130,7 @@ private fun AppNav(credentials: Credentials) {
             DetailScreen(
                 mediaId = mediaId,
                 api = api,
+                imageLoader = imageLoader,
                 // A movie plays its own id, an episode plays its own. Detail
                 // knows which, so it hands back the id to stream rather than
                 // the item it was showing.

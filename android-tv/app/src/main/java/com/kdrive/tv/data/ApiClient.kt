@@ -98,6 +98,20 @@ class ApiClient(private val credentials: Credentials) {
     fun posterUrl(posterPath: String) = "https://image.tmdb.org/t/p/w342$posterPath"
 
     /**
+     * Artwork for the full-width hero, at a size worth sending to a 1080p
+     * panel.
+     *
+     * Prefers the 16:9 backdrop and falls back to the poster, because items
+     * matched before backdrops were stored have only a poster — a cropped
+     * portrait behind the scrim still beats an empty rectangle.
+     */
+    fun heroImageUrl(backdropPath: String?, posterPath: String?): String? = when {
+        backdropPath != null -> "https://image.tmdb.org/t/p/w1280$backdropPath"
+        posterPath != null -> "https://image.tmdb.org/t/p/w780$posterPath"
+        else -> null
+    }
+
+    /**
      * URL Media3 streams from. Accepts a media _id or an episode _id — the
      * route resolves either (app/api/media/stream/[id]/route.js).
      */

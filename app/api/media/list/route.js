@@ -23,6 +23,11 @@ export async function GET(request) {
           title: 1,
           year: 1,
           posterPath: 1,
+          backdropPath: 1,
+          // The TV client's hero shows a blurb for whatever has focus, and it
+          // only ever loads the list — without this it would have to fetch
+          // each item's detail just to render one paragraph.
+          description: 1,
           status: 1,
           createdAt: 1,
         },

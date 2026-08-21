@@ -19,6 +19,7 @@ data class MediaItem(
     val description: String? = null,
     val year: Int? = null,
     val posterPath: String? = null,
+    val backdropPath: String? = null,
     val status: String, // processing | matched | unmatched
     val driveFileId: String? = null,
     val size: Long? = null,
@@ -56,6 +57,7 @@ data class MediaDetail(
     val description: String? = null,
     val year: Int? = null,
     val posterPath: String? = null,
+    val backdropPath: String? = null,
     val status: String,
     val driveFileId: String? = null,
     val size: Long? = null,

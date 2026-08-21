@@ -83,13 +83,10 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 
-    // Compose for TV — focus-aware, D-pad-friendly components.
-    //
-    // tv-material only: tv-foundation's TvLazyColumn/TvLazyVerticalGrid were
-    // deprecated after 1.0.0-alpha12 once focus handling landed in ordinary
-    // compose-foundation, so the standard LazyColumn/LazyVerticalGrid are the
-    // supported way to build a D-pad-navigable list now.
-    implementation("androidx.tv:tv-material:1.0.0")
+    // No androidx.tv artifacts. Their lazy layouts are deprecated and their
+    // material components are still moving between releases; the UI is built
+    // on stable compose-foundation with hand-rolled focus treatment instead,
+    // which is also what lets focus drive the browse hero.
 
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.navigation:navigation-compose:2.8.1")

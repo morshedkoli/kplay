@@ -17,8 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.Button
-import androidx.tv.material3.MaterialTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.background
+import com.kdrive.tv.ui.components.ActionButton
+import com.kdrive.tv.ui.theme.K
 
 /** First-run screen: server URL + device key, the same
  * `x-kdrive-device-key` a non-browser client sends (lib/auth.js). Persisted
@@ -34,13 +36,14 @@ fun LoginScreen(
     var deviceKey by remember { mutableStateOf("") }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(48.dp),
+        modifier = Modifier.fillMaxSize().background(K.Ink).padding(64.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("KDrive TV", style = MaterialTheme.typography.headlineLarge)
+        Text("KDrive", style = K.Hero, color = K.TextPrimary)
         Text(
             "Enter your KDrive server address and device key.",
-            style = MaterialTheme.typography.bodyMedium,
+            style = K.Body,
+            color = K.TextMuted,
             modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
         )
 
@@ -63,12 +66,11 @@ fun LoginScreen(
             Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 16.dp))
         }
 
-        Button(
+        ActionButton(
+            label = if (busy) "Checking…" else "Sign in",
             onClick = { onSubmit(serverUrl.trim(), deviceKey.trim()) },
             enabled = !busy && serverUrl.isNotBlank() && deviceKey.isNotBlank(),
             modifier = Modifier.padding(top = 24.dp).align(Alignment.Start),
-        ) {
-            Text(if (busy) "Checking…" else "Sign in")
-        }
+        )
     }
 }
