@@ -105,14 +105,61 @@ fun DetailScreen(
                 CircularProgressIndicator(color = K.Accent)
             }
 
-            else -> {
-                val item = detail!!
+            else -> DetailContent(
+                item = detail!!,
+                api = api,
+                imageLoader = imageLoader,
+                onPlay = onPlay,
+                season = season,
+                onSeason = { season = it },
+                firstAction = firstAction,
+            )
+        }
+    }
+}
+
+/**
+ * The detail screen with its data already in hand. Split out from the
+ * fetching wrapper so a screenshot test can render it with fixed content.
+ */
+@Composable
+internal fun DetailContent(
+    item: MediaDetail,
+    api: ApiClient,
+    imageLoader: ImageLoader,
+    onPlay: (id: String, title: String) -> Unit,
+    season: Int? = item.seasons().firstOrNull()?.first,
+    onSeason: (Int) -> Unit = {},
+    firstAction: FocusRequester? = null,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.fillMaxSize().background(K.Ink)) {
+        run {
                 Backdrop(item, api, imageLoader)
+
+                // Movies only. A movie page has nothing but one paragraph, so
+                // the poster earns the right half; a series page has an
+                // episode list, and that list needs the full width more than
+                // the artwork does — sharing it put rows under the poster.
+                if (!item.isSeries) item.posterPath?.let { path ->
+                    AsyncImage(
+                        model = api.posterUrl(path),
+                        imageLoader = imageLoader,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = K.Gutter)
+                            .width(232.dp)
+                            .height(348.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                    )
+                }
 
                 Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 ) {
-                    Spacer(Modifier.height(210.dp))
+                    Spacer(Modifier.height(140.dp))
 
                     Column(
                         Modifier.padding(horizontal = K.Gutter).fillMaxWidth(0.62f),
@@ -159,7 +206,7 @@ fun DetailScreen(
                                 SeasonPicker(
                                     seasons = seasons.map { it.first },
                                     selected = season,
-                                    onSelect = { season = it },
+                                    onSelect = onSeason,
                                     modifier = Modifier.padding(top = 26.dp),
                                 )
                             }
@@ -203,7 +250,6 @@ fun DetailScreen(
 
                     Spacer(Modifier.height(48.dp))
                 }
-            }
         }
     }
 }
@@ -212,7 +258,7 @@ fun DetailScreen(
 private fun Backdrop(item: MediaDetail, api: ApiClient, imageLoader: ImageLoader) {
     val art = api.heroImageUrl(item.backdropPath, item.posterPath)
 
-    Box(Modifier.fillMaxWidth().height(440.dp)) {
+    Box(Modifier.fillMaxWidth().height(360.dp)) {
         if (art != null) {
             AsyncImage(
                 model = art,

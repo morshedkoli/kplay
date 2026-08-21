@@ -19,7 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,10 +40,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.kdrive.tv.ui.theme.K
 
-enum class Section(val label: String) {
-    Home("Home"),
-    Movies("Movies"),
-    Series("Series"),
+enum class Section(val label: String, val icon: ImageVector) {
+    Home("Home", Icons.Filled.Home),
+    Movies("Movies", Icons.Filled.PlayArrow),
+    Series("Series", Icons.Filled.List),
 }
 
 /**
@@ -151,12 +157,14 @@ private fun RailItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // Selection is carried by an accent dot, not by a filled row: only one
-        // thing on screen should ever be accent-coloured at a time, and while
-        // you are in the rail that thing is where you already are.
-        Box(
-            Modifier.size(8.dp).clip(CircleShape)
-                .background(if (selected) K.Accent else Color.Transparent),
+        // Every entry always draws a glyph. The first version showed only a
+        // dot, and an unselected dot was transparent, so two of the three menu
+        // items were invisible — there was nothing to see or aim at.
+        Icon(
+            imageVector = section.icon,
+            contentDescription = section.label,
+            tint = if (selected) K.Accent else tint,
+            modifier = Modifier.size(24.dp),
         )
         if (expanded) Text(section.label, style = K.Body, color = tint)
     }

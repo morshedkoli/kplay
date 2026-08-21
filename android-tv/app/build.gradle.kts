@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("io.github.takahirom.roborazzi")
 }
 
 /**
@@ -119,5 +120,10 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.26.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.26.0")
+    // Real artwork can not be fetched in a JVM test; this substitutes a solid
+    // fill so screenshots show true poster geometry rather than empty tiles.
+    testImplementation("io.coil-kt:coil-test:2.7.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

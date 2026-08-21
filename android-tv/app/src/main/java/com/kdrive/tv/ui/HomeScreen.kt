@@ -62,8 +62,55 @@ fun HomeScreen(
     var movies by remember { mutableStateOf<List<MediaItem>?>(null) }
     var series by remember { mutableStateOf<List<MediaItem>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val library = api.listLibrary()
+            movies = library.movies
+            series = library.series
+        } catch (e: Exception) {
+            error = e.message ?: "Couldn't reach the server"
+        }
+    }
+
+    when {
+        error != null -> Framed { Message("Can't reach your library", error!!) }
+
+        movies == null || series == null -> Framed {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = K.Accent)
+            }
+        }
+
+        else -> BrowseContent(
+            movies = movies!!,
+            series = series!!,
+            api = api,
+            imageLoader = imageLoader,
+            onSelect = onSelect,
+        )
+    }
+}
+
+/**
+ * The browse screen with its data already in hand.
+ *
+ * Split out from the fetching wrapper so it can be rendered from a screenshot
+ * test with fixed content — this machine has no hypervisor and therefore no
+ * emulator, so JVM rendering is the only way to actually look at the result.
+ */
+@Composable
+internal fun BrowseContent(
+    movies: List<MediaItem>,
+    series: List<MediaItem>,
+    api: ApiClient,
+    imageLoader: ImageLoader,
+    onSelect: (MediaItem) -> Unit,
+) {
     var section by remember { mutableStateOf(Section.Home) }
-    var spotlight by remember { mutableStateOf<MediaItem?>(null) }
+    var spotlight by remember {
+        mutableStateOf(movies.firstOrNull() ?: series.firstOrNull())
+    }
 
     // Something must hold focus or the remote does nothing at all: Android
     // delivers key events to the focused view, and with no focus there is
@@ -71,19 +118,8 @@ fun HomeScreen(
     val firstCard = remember { FocusRequester() }
     var focusClaimed by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        try {
-            val library = api.listLibrary()
-            movies = library.movies
-            series = library.series
-            spotlight = library.movies.firstOrNull() ?: library.series.firstOrNull()
-        } catch (e: Exception) {
-            error = e.message ?: "Couldn't reach the server"
-        }
-    }
-
     LaunchedEffect(movies, series) {
-        if (!focusClaimed && (movies?.isNotEmpty() == true || series?.isNotEmpty() == true)) {
+        if (!focusClaimed && (movies.isNotEmpty() || series.isNotEmpty())) {
             focusClaimed = true
             // Guarded: requestFocus throws if the node isn't attached yet, and
             // a race here would take the whole screen down.
@@ -101,70 +137,65 @@ fun HomeScreen(
         )
 
         Box(Modifier.fillMaxSize()) {
-            when {
-                error != null -> Message("Can't reach your library", error!!)
-
-                movies == null || series == null -> Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator(color = K.Accent) }
-
-                movies!!.isEmpty() && series!!.isEmpty() -> Message(
+            if (movies.isEmpty() && series.isEmpty()) {
+                Message(
                     "Nothing here yet",
                     "Drop video files into your Drive folder, then run a scan from the web app.",
                 )
+            } else {
+                Hero(item = spotlight, api = api, imageLoader = imageLoader)
 
-                else -> {
-                    Hero(item = spotlight, api = api, imageLoader = imageLoader)
+                // A plain scrolling Column, not a LazyColumn. With only a few
+                // rows there is nothing to gain from laziness, and a
+                // LazyColumn does not compose off-screen rows — so focus
+                // search moving down would find no target and simply stop,
+                // which is exactly the "can't move the page" symptom.
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                ) {
+                    // Holds the top of the screen open for the hero. Rows
+                    // scroll up over it, which is what gives depth.
+                    Spacer(Modifier.height(252.dp))
 
-                    // A plain scrolling Column, not a LazyColumn. With only a
-                    // few rows there is nothing to gain from laziness, and a
-                    // LazyColumn does not compose off-screen rows — so focus
-                    // search moving down would find no target and simply stop,
-                    // which is exactly the "can't move the page" symptom.
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(28.dp),
-                    ) {
-                        // Holds the top of the screen open for the hero. Rows
-                        // scroll up over it, which is what gives depth.
-                        Spacer(Modifier.height(330.dp))
+                    val showMovies = section != Section.Series && movies.isNotEmpty()
+                    val showSeries = section != Section.Movies && series.isNotEmpty()
 
-                        val showMovies = section != Section.Series && movies!!.isNotEmpty()
-                        val showSeries = section != Section.Movies && series!!.isNotEmpty()
-
-                        if (showMovies) {
-                            CarouselRow(
-                                title = "Movies",
-                                items = movies!!,
-                                api = api,
-                                imageLoader = imageLoader,
-                                onSelect = onSelect,
-                                onFocusItem = { spotlight = it },
-                                firstItemFocusRequester = firstCard,
-                            )
-                        }
-                        if (showSeries) {
-                            CarouselRow(
-                                title = "Series",
-                                items = series!!,
-                                api = api,
-                                imageLoader = imageLoader,
-                                onSelect = onSelect,
-                                onFocusItem = { spotlight = it },
-                                // Only when Movies isn't showing, so exactly
-                                // one card ever claims the initial focus.
-                                firstItemFocusRequester = if (showMovies) null else firstCard,
-                            )
-                        }
-                        Spacer(Modifier.height(40.dp))
+                    if (showMovies) {
+                        CarouselRow(
+                            title = "Movies",
+                            items = movies,
+                            api = api,
+                            imageLoader = imageLoader,
+                            onSelect = onSelect,
+                            onFocusItem = { spotlight = it },
+                            firstItemFocusRequester = firstCard,
+                        )
                     }
+                    if (showSeries) {
+                        CarouselRow(
+                            title = "Series",
+                            items = series,
+                            api = api,
+                            imageLoader = imageLoader,
+                            onSelect = onSelect,
+                            onFocusItem = { spotlight = it },
+                            // Only when Movies isn't showing, so exactly one
+                            // card ever claims the initial focus.
+                            firstItemFocusRequester = if (showMovies) null else firstCard,
+                        )
+                    }
+                    Spacer(Modifier.height(40.dp))
                 }
             }
         }
     }
+}
+
+/** Page background for the states that render before any content exists. */
+@Composable
+private fun Framed(content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().background(K.Ink)) { content() }
 }
 
 /**
@@ -175,7 +206,7 @@ fun HomeScreen(
  */
 @Composable
 private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
-    Box(Modifier.fillMaxWidth().height(420.dp)) {
+    Box(Modifier.fillMaxWidth().height(264.dp)) {
         Crossfade(targetState = item, animationSpec = tween(320), label = "heroArt") { current ->
             val art = current?.let { api.heroImageUrl(it.backdropPath, it.posterPath) }
             if (art != null) {
