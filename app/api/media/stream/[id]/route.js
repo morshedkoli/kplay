@@ -27,10 +27,16 @@ import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// 8 MB is a few seconds of 1080p — small enough that a response always
-// completes well inside the function limit, large enough that the request
-// count stays sane over a two-hour film.
-const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
+// Capping is off by default, which is what a VPS wants: browsers and
+// ExoPlayer both stream an open-ended range happily, and an uncapped response
+// is one connection instead of hundreds.
+//
+// Set STREAM_MAX_CHUNK_BYTES on a host with a function time limit (Vercel
+// kills a request at 300s) — 8388608 is a sensible value there. Be aware the
+// Android TV client uses ExoPlayer's ProgressiveMediaSource, which expects an
+// open-ended range to run to the end of the file; a truncated range may end
+// its playback early. Browsers are unaffected either way.
+const MAX_CHUNK_BYTES = Number(process.env.STREAM_MAX_CHUNK_BYTES || 0);
 
 async function resolveDriveFileId(id) {
   const _id = new ObjectId(id);
@@ -61,8 +67,10 @@ function resolveRange(rangeHeader, size) {
     if (end >= size) end = size - 1;
   }
 
-  // The cap is what keeps a single response short.
-  if (end - start + 1 > MAX_CHUNK_BYTES) end = start + MAX_CHUNK_BYTES - 1;
+  // The cap is what keeps a single response short. Zero disables it.
+  if (MAX_CHUNK_BYTES > 0 && end - start + 1 > MAX_CHUNK_BYTES) {
+    end = start + MAX_CHUNK_BYTES - 1;
+  }
 
   return { start, end };
 }
@@ -88,7 +96,8 @@ export async function GET(request, { params }) {
     return Response.json({ error: 'Storage read failed' }, { status: 502 });
   }
 
-  const range = resolveRange(request.headers.get('range'), meta.size);
+  const rangeHeader = request.headers.get('range');
+  const range = resolveRange(rangeHeader, meta.size);
   if (!range) {
     return new Response(null, {
       status: 416,
@@ -118,14 +127,21 @@ export async function GET(request, { params }) {
   // result.stream is a Node Readable (googleapis responseType: 'stream').
   // Response wants a web ReadableStream; converting explicitly keeps
   // backpressure intact instead of relying on undici's coercion.
+  // 206 whenever the client asked for a range, or whenever the cap made the
+  // response narrower than the whole file. A plain GET answered in full is a
+  // 200 — replying 206 to a request that carried no Range header is invalid.
+  const isPartial = Boolean(rangeHeader) || range.start > 0 || range.end < meta.size - 1;
+
+  const headers = {
+    'Content-Length': String(range.end - range.start + 1),
+    'Accept-Ranges': 'bytes',
+    'Content-Type': meta.mimeType || 'application/octet-stream',
+    'Cache-Control': 'private, no-store',
+  };
+  if (isPartial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${meta.size}`;
+
   return new Response(Readable.toWeb(result.stream), {
-    status: 206,
-    headers: {
-      'Content-Length': String(range.end - range.start + 1),
-      'Content-Range': `bytes ${range.start}-${range.end}/${meta.size}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Type': meta.mimeType || 'application/octet-stream',
-      'Cache-Control': 'private, no-store',
-    },
+    status: isPartial ? 206 : 200,
+    headers,
   });
 }

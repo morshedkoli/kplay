@@ -21,7 +21,8 @@ private data class ProgressResponse(val positionSeconds: Double = 0.0)
 @Serializable
 private data class ProgressRequest(val id: String, val positionSeconds: Double)
 
-/** Thin client for the KDrive media API — GET /api/media/list, GET /api/media/[id]. */
+/** Thin client for the KDrive media API — GET /api/media/list, GET /api/media/[id],
+ * and the progress endpoints. Auth is the shared device key header. */
 class ApiClient(private val credentials: Credentials) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -50,16 +51,21 @@ class ApiClient(private val credentials: Credentials) {
         }
     }
 
-    /** Movies only — series aren't part of this app's scope. */
-    suspend fun listMovies(): List<Movie> {
-        return json.decodeFromString(MediaListResponse.serializer(), getText("/api/media/list")).movies
+    /** The whole library, already split into movies and series by the server. */
+    suspend fun listLibrary(): MediaListResponse {
+        return json.decodeFromString(MediaListResponse.serializer(), getText("/api/media/list"))
     }
 
-    suspend fun getMovie(id: String): Movie {
-        return json.decodeFromString(Movie.serializer(), getText("/api/media/$id"))
+    /** One item with its episodes — the episode list is empty for a movie. */
+    suspend fun getMedia(id: String): MediaDetail {
+        return json.decodeFromString(MediaDetail.serializer(), getText("/api/media/$id"))
     }
 
-    /** Resume position, keyed by media _id — same key the web player (/movies/[id]) uses. */
+    /**
+     * Resume position. The key is whatever is playing: a media _id for a
+     * movie, an episode _id for an episode — the same key the web player
+     * posts under, so a position carries across clients.
+     */
     suspend fun getProgress(id: String): Double = withContext(Dispatchers.IO) {
         try {
             val body = getText("/api/media/progress?id=$id")
@@ -91,8 +97,10 @@ class ApiClient(private val credentials: Credentials) {
     /** TMDb-hosted poster — public CDN, no auth header needed or sent. */
     fun posterUrl(posterPath: String) = "https://image.tmdb.org/t/p/w342$posterPath"
 
-    /** URL Media3 streams the actual video from — Range/206-capable proxy in
-     * front of the Drive file (app/api/media/stream/[id]/route.js). */
+    /**
+     * URL Media3 streams from. Accepts a media _id or an episode _id — the
+     * route resolves either (app/api/media/stream/[id]/route.js).
+     */
     fun streamUrl(id: String) = "${credentials.serverUrl}/api/media/stream/$id"
 
     fun authHeaders(): Map<String, String> = mapOf(DEVICE_KEY_HEADER to credentials.deviceKey)

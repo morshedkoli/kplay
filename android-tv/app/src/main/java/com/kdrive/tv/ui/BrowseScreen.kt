@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -19,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.tv.foundation.lazy.grid.TvGridCells
+import androidx.tv.foundation.lazy.grid.TvGridItemSpan
 import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
 import androidx.tv.foundation.lazy.grid.items
 import androidx.tv.material3.Card
@@ -27,67 +29,115 @@ import androidx.tv.material3.Text as TvText
 import coil.compose.AsyncImage
 import coil.ImageLoader
 import com.kdrive.tv.data.ApiClient
-import com.kdrive.tv.data.Movie
+import com.kdrive.tv.data.MediaItem
 
-/** TV-focusable poster grid, D-pad navigable (TvLazyVerticalGrid handles
- * focus movement between cells natively). Mirrors app/Movies.js's grid. */
+/**
+ * TV-focusable poster grid, D-pad navigable (TvLazyVerticalGrid handles focus
+ * movement between cells natively). Mirrors app/LibraryGrid.js, except both
+ * halves of the library are shown here as two labelled sections rather than
+ * as separate /movies and /series routes — a TV user shouldn't have to
+ * navigate a menu to reach half their library.
+ */
 @Composable
 fun BrowseScreen(
     api: ApiClient,
     imageLoader: ImageLoader,
-    onSelect: (Movie) -> Unit,
+    onSelect: (MediaItem) -> Unit,
 ) {
-    var movies by remember { mutableStateOf<List<Movie>?>(null) }
+    var movies by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var series by remember { mutableStateOf<List<MediaItem>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         try {
-            movies = api.listMovies()
+            val library = api.listLibrary()
+            movies = library.movies
+            series = library.series
         } catch (e: Exception) {
-            error = e.message ?: "Failed to load movies"
+            error = e.message ?: "Failed to load the library"
         }
     }
 
+    val loaded = movies != null && series != null
+    val isEmpty = loaded && movies!!.isEmpty() && series!!.isEmpty()
+
     when {
         error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Couldn't load movies: $error", color = MaterialTheme.colorScheme.error)
+            Text("Couldn't load the library: $error", color = MaterialTheme.colorScheme.error)
         }
-        movies == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        !loaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        movies!!.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No movies yet — add one from the KDrive web app.")
+        isEmpty -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Nothing here yet — add files to your Drive folder, then scan from the web app.")
         }
         else -> TvLazyVerticalGrid(
-            columns = TvGridCells.Fixed(6),
+            columns = TvGridCells.Fixed(COLUMNS),
             modifier = Modifier.fillMaxSize().padding(32.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            items(movies!!) { movie ->
-                val imageUrl = movie.posterPath?.let { api.posterUrl(it) }
-                PosterCard(movie = movie, imageUrl = imageUrl, imageLoader = imageLoader, onClick = { onSelect(movie) })
+            if (movies!!.isNotEmpty()) {
+                item(span = { TvGridItemSpan(COLUMNS) }) { SectionHeading("Movies") }
+                items(movies!!) { item ->
+                    PosterCard(item, api, imageLoader) { onSelect(item) }
+                }
+            }
+            if (series!!.isNotEmpty()) {
+                item(span = { TvGridItemSpan(COLUMNS) }) { SectionHeading("Series") }
+                items(series!!) { item ->
+                    PosterCard(item, api, imageLoader) { onSelect(item) }
+                }
             }
         }
     }
 }
 
+private const val COLUMNS = 6
+
 @Composable
-private fun PosterCard(movie: Movie, imageUrl: String?, imageLoader: ImageLoader, onClick: () -> Unit) {
+private fun SectionHeading(text: String) {
+    TvText(
+        text = text,
+        style = MaterialTheme.typography.headlineSmall,
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun PosterCard(
+    item: MediaItem,
+    api: ApiClient,
+    imageLoader: ImageLoader,
+    onClick: () -> Unit,
+) {
+    val imageUrl = item.posterPath?.let { api.posterUrl(it) }
+
     Card(onClick = onClick, modifier = Modifier.aspectRatio(2f / 3f)) {
         Box(Modifier.fillMaxSize()) {
             if (imageUrl != null) {
                 AsyncImage(
                     model = imageUrl,
                     imageLoader = imageLoader,
-                    contentDescription = movie.title,
+                    contentDescription = item.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
+                // No poster: the title is all the user has to go on, so give
+                // it the whole tile rather than a generic placeholder icon.
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    TvText(movie.title, color = Color.White, modifier = Modifier.padding(8.dp))
+                    TvText(item.title, color = Color.White, modifier = Modifier.padding(8.dp))
                 }
+            }
+
+            if (item.isSeries) {
+                TvText(
+                    text = "${item.episodeCount} ep",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
+                )
             }
         }
     }

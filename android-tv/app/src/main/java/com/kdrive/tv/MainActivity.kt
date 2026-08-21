@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
                                 loginError = null
                                 try {
                                     // Verify the credentials actually work before saving them.
-                                    ApiClient(Credentials(serverUrl.trimEnd('/'), deviceKey)).listMovies()
+                                    ApiClient(Credentials(serverUrl.trimEnd('/'), deviceKey)).listLibrary()
                                     prefs.save(serverUrl, deviceKey)
                                 } catch (e: Exception) {
                                     loginError = e.message ?: "Could not reach server"
@@ -98,26 +98,29 @@ private fun AppNav(credentials: Credentials) {
             BrowseScreen(
                 api = api,
                 imageLoader = imageLoader,
-                onSelect = { movie -> navController.navigate("detail/${movie.id}") },
+                onSelect = { item -> navController.navigate("detail/${item.id}") },
             )
         }
         composable(
-            "detail/{movieId}",
-            arguments = listOf(navArgument("movieId") { type = NavType.StringType }),
+            "detail/{mediaId}",
+            arguments = listOf(navArgument("mediaId") { type = NavType.StringType }),
         ) { backStackEntry ->
-            val movieId = backStackEntry.arguments?.getString("movieId")!!
+            val mediaId = backStackEntry.arguments?.getString("mediaId")!!
             DetailScreen(
-                movieId = movieId,
+                mediaId = mediaId,
                 api = api,
-                onPlay = { movie -> navController.navigate("player/${movie.id}") },
+                // A movie plays its own id, an episode plays its own. Detail
+                // knows which, so it hands back the id to stream rather than
+                // the item it was showing.
+                onPlay = { playableId -> navController.navigate("player/$playableId") },
             )
         }
         composable(
-            "player/{movieId}",
-            arguments = listOf(navArgument("movieId") { type = NavType.StringType }),
+            "player/{mediaId}",
+            arguments = listOf(navArgument("mediaId") { type = NavType.StringType }),
         ) { backStackEntry ->
-            val movieId = backStackEntry.arguments?.getString("movieId")!!
-            PlayerScreen(movieId = movieId, api = api)
+            val mediaId = backStackEntry.arguments?.getString("mediaId")!!
+            PlayerScreen(mediaId = mediaId, api = api)
         }
     }
 }

@@ -25,12 +25,15 @@ private const val PROGRESS_POST_INTERVAL_SECONDS = 10L
  * Range/206-capable proxy in front of the Drive file, same endpoint the web
  * player uses.
  *
- * Resume position is fetched/saved through /api/media/progress, keyed by the
- * media _id — same endpoint and key the web player (/movies/[id]) uses, so
- * playback position carries over between TV and web.
+ * `mediaId` is whatever is being played: a media _id for a movie, an episode
+ * _id for a series episode. The stream route resolves either.
+ *
+ * Resume position is fetched/saved through /api/media/progress under that same
+ * id — the key the web player uses too, so a part-watched episode resumes at
+ * the same spot on either client.
  */
 @Composable
-fun PlayerScreen(movieId: String, api: ApiClient) {
+fun PlayerScreen(mediaId: String, api: ApiClient) {
     val context = LocalContext.current
 
     val player = remember {
@@ -38,7 +41,7 @@ fun PlayerScreen(movieId: String, api: ApiClient) {
             .setDefaultRequestProperties(api.authHeaders())
 
         val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-            .createMediaSource(MediaItem.fromUri(api.streamUrl(movieId)))
+            .createMediaSource(MediaItem.fromUri(api.streamUrl(mediaId)))
 
         ExoPlayer.Builder(context).build().apply {
             setMediaSource(mediaSource)
@@ -46,8 +49,8 @@ fun PlayerScreen(movieId: String, api: ApiClient) {
         }
     }
 
-    LaunchedEffect(movieId) {
-        val resumeSeconds = api.getProgress(movieId)
+    LaunchedEffect(mediaId) {
+        val resumeSeconds = api.getProgress(mediaId)
         if (resumeSeconds > 0) {
             player.seekTo((resumeSeconds * 1000).toLong())
         }
@@ -56,11 +59,11 @@ fun PlayerScreen(movieId: String, api: ApiClient) {
 
     // Periodically save position while playing, mirroring the web player's
     // PROGRESS_POST_INTERVAL_SECONDS cadence.
-    LaunchedEffect(movieId) {
+    LaunchedEffect(mediaId) {
         while (isActive) {
             delay(PROGRESS_POST_INTERVAL_SECONDS * 1000)
             if (player.playbackState == Player.STATE_READY && player.isPlaying) {
-                api.postProgress(movieId, player.currentPosition / 1000.0)
+                api.postProgress(mediaId, player.currentPosition / 1000.0)
             }
         }
     }
