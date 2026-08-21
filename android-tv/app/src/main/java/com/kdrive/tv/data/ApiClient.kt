@@ -94,6 +94,34 @@ class ApiClient(private val credentials: Credentials) {
         }
     }
 
+    /**
+     * Same save as postProgress, callable from somewhere that isn't a
+     * coroutine — the player's key handler runs on the main thread and has to
+     * fire this off as the user leaves. Enqueued on OkHttp's own dispatcher so
+     * it neither blocks the keypress nor dies with the composition.
+     */
+    fun postProgressAsync(id: String, positionSeconds: Double) {
+        try {
+            val payload = json.encodeToString(
+                ProgressRequest.serializer(),
+                ProgressRequest(id, positionSeconds),
+            )
+            val req = Request.Builder()
+                .url("${credentials.serverUrl}/api/media/progress")
+                .header(DEVICE_KEY_HEADER, credentials.deviceKey)
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            http.newCall(req).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: IOException) = Unit
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.close()
+                }
+            })
+        } catch (e: Exception) {
+            // Resume position is a convenience, never worth surfacing.
+        }
+    }
+
     /** TMDb-hosted poster — public CDN, no auth header needed or sent. */
     fun posterUrl(posterPath: String) = "https://image.tmdb.org/t/p/w342$posterPath"
 

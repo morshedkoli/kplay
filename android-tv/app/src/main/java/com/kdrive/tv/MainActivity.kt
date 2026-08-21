@@ -1,5 +1,6 @@
 package com.kdrive.tv
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -133,16 +134,30 @@ private fun AppNav(credentials: Credentials) {
                 imageLoader = imageLoader,
                 // A movie plays its own id, an episode plays its own. Detail
                 // knows which, so it hands back the id to stream rather than
-                // the item it was showing.
-                onPlay = { playableId -> navController.navigate("player/$playableId") },
+                // the item it was showing, plus a label for the player.
+                onPlay = { playableId, label ->
+                    navController.navigate("player/$playableId?title=${Uri.encode(label)}")
+                },
             )
         }
         composable(
-            "player/{mediaId}",
-            arguments = listOf(navArgument("mediaId") { type = NavType.StringType }),
+            "player/{mediaId}?title={title}",
+            arguments = listOf(
+                navArgument("mediaId") { type = NavType.StringType },
+                navArgument("title") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
         ) { backStackEntry ->
             val mediaId = backStackEntry.arguments?.getString("mediaId")!!
-            PlayerScreen(mediaId = mediaId, api = api)
+            PlayerScreen(
+                mediaId = mediaId,
+                title = backStackEntry.arguments?.getString("title"),
+                api = api,
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }

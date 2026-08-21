@@ -46,15 +46,16 @@ import com.kdrive.tv.ui.theme.K
  * season selector and an episode list, so the screen answers "what is this"
  * and "which one do I play" without a second navigation step.
  *
- * `onPlay` receives the id to stream: a movie plays itself, an episode plays
- * its own id, and this screen is the only place that knows which.
+ * `onPlay` receives the id to stream and a label for the player to show: a
+ * movie plays itself, an episode plays its own id, and this screen is the
+ * only place that knows which.
  */
 @Composable
 fun DetailScreen(
     mediaId: String,
     api: ApiClient,
     imageLoader: ImageLoader,
-    onPlay: (String) -> Unit,
+    onPlay: (id: String, title: String) -> Unit,
 ) {
     var detail by remember { mutableStateOf<MediaDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -113,7 +114,7 @@ fun DetailScreen(
                                 ActionButton(
                                     label = if (playable) "Play" else "Not available",
                                     enabled = playable,
-                                    onClick = { onPlay(item.id) },
+                                    onClick = { onPlay(item.id, item.title) },
                                     leading = { PlayGlyph() },
                                     modifier = Modifier.padding(top = 6.dp),
                                 )
@@ -164,7 +165,7 @@ fun DetailScreen(
                             items(shown.second, key = { it.id }) { episode ->
                                 EpisodeRow(
                                     episode = episode,
-                                    onPlay = { onPlay(episode.id) },
+                                    onPlay = { onPlay(episode.id, "${item.title}  ·  ${episode.label}") },
                                     modifier = Modifier.padding(
                                         horizontal = K.Gutter,
                                         vertical = 5.dp,
