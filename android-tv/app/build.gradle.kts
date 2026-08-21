@@ -66,6 +66,12 @@ android {
         jvmTarget = "17"
     }
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -106,4 +112,12 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Focus traversal is the thing most likely to be broken and the thing
+    // hardest to eyeball, so it gets tests that run on the JVM — Robolectric
+    // means no device or emulator is needed to prove the D-pad works.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

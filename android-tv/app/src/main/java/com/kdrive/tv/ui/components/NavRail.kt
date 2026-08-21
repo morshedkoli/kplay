@@ -5,7 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +75,9 @@ fun NavRail(
                     listOf(K.Ink, K.Ink.copy(alpha = if (expanded) 0.97f else 0.86f), Color.Transparent),
                 )
             )
+            // focusGroup keeps the rail a single stop in the traversal: focus
+            // enters it once from the left, moves within it, and leaves right.
+            .focusGroup()
             .onFocusChanged { expanded = it.hasFocus }
             .padding(vertical = 28.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -139,7 +142,6 @@ private fun RailItem(
             .clip(RoundedCornerShape(6.dp))
             .background(if (focused) K.SurfaceHi else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

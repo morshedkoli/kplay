@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +47,7 @@ fun CarouselRow(
     onSelect: (MediaItem) -> Unit,
     onFocusItem: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
+    firstItemFocusRequester: FocusRequester? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -56,6 +59,9 @@ fun CarouselRow(
             modifier = Modifier.padding(start = K.Gutter, bottom = 14.dp),
         )
         LazyRow(
+            // One stop in the vertical traversal: focus enters the row, moves
+            // along it, and leaves from wherever it got to.
+            modifier = Modifier.focusGroup(),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             // The focus ring and the 6% scale both overflow the poster bounds,
             // so the row needs slack or the first and last cards get clipped.
@@ -66,13 +72,14 @@ fun CarouselRow(
                 bottom = 10.dp,
             ),
         ) {
-            items(items, key = { it.id }) { item ->
+            itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
                 PosterCard(
                     item = item,
                     api = api,
                     imageLoader = imageLoader,
                     onClick = { onSelect(item) },
                     onFocused = { onFocusItem(item) },
+                    focusRequester = if (index == 0) firstItemFocusRequester else null,
                 )
             }
         }
@@ -93,12 +100,14 @@ fun PosterCard(
     imageLoader: ImageLoader,
     onClick: () -> Unit,
     onFocused: () -> Unit,
+    focusRequester: FocusRequester? = null,
 ) {
     val posterUrl = item.posterPath?.let { api.posterUrl(it) }
 
     FocusBox(
         onClick = onClick,
         onFocused = onFocused,
+        focusRequester = focusRequester,
         modifier = Modifier.size(width = K.PosterW, height = K.PosterH),
     ) { focused ->
         if (posterUrl != null) {

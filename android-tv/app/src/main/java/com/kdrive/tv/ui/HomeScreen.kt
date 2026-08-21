@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,29 +25,33 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.MediaItem
-import com.kdrive.tv.ui.components.ActionButton
 import com.kdrive.tv.ui.components.CarouselRow
 import com.kdrive.tv.ui.components.NavRail
 import com.kdrive.tv.ui.components.Section
 import com.kdrive.tv.ui.theme.K
 
 /**
- * The browse screen: a full-bleed hero above horizontal rows, with the rail
- * floating over the left edge.
+ * The browse screen: a rail on the left, and to its right a hero above
+ * horizontal rows.
  *
- * The signature behaviour is that the hero *follows focus* — move to any
- * poster and the backdrop, title and blurb behind the rows become that title's.
- * It costs nothing (the data is already loaded) and it turns a static header
- * into a preview surface, which is the thing that makes this feel like a
- * television app rather than a grid of links.
+ * The rail is a layout sibling, not an overlay. Overlaying it looked better
+ * but made it unreachable: focus search on Android is geometric, so a rail
+ * drawn on top of the content it shares coordinates with gives the D-pad no
+ * unambiguous direction to travel in. Real columns, real edges.
+ *
+ * The hero follows focus — move to any poster and the backdrop, title and
+ * blurb become that title's. The data is already loaded, so a static header
+ * becomes a preview surface for free.
  */
 @Composable
 fun HomeScreen(
@@ -61,6 +65,12 @@ fun HomeScreen(
     var section by remember { mutableStateOf(Section.Home) }
     var spotlight by remember { mutableStateOf<MediaItem?>(null) }
 
+    // Something must hold focus or the remote does nothing at all: Android
+    // delivers key events to the focused view, and with no focus there is
+    // nowhere for them to go. The first card claims it as soon as data lands.
+    val firstCard = remember { FocusRequester() }
+    var focusClaimed by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         try {
             val library = api.listLibrary()
@@ -72,36 +82,60 @@ fun HomeScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(K.Ink)) {
-        when {
-            error != null -> Message(
-                headline = "Can't reach your library",
-                detail = error!!,
-            )
+    LaunchedEffect(movies, series) {
+        if (!focusClaimed && (movies?.isNotEmpty() == true || series?.isNotEmpty() == true)) {
+            focusClaimed = true
+            // Guarded: requestFocus throws if the node isn't attached yet, and
+            // a race here would take the whole screen down.
+            runCatching { firstCard.requestFocus() }
+        }
+    }
 
-            movies == null || series == null -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator(color = K.Accent) }
+    Row(Modifier.fillMaxSize().background(K.Ink)) {
+        NavRail(
+            selected = section,
+            onSelect = { section = it },
+            // Above the content so the expanded labels are not painted over,
+            // while still occupying its own column in the layout.
+            modifier = Modifier.zIndex(1f),
+        )
 
-            movies!!.isEmpty() && series!!.isEmpty() -> Message(
-                headline = "Nothing here yet",
-                detail = "Drop video files into your Drive folder, then run a scan from the web app.",
-            )
+        Box(Modifier.fillMaxSize()) {
+            when {
+                error != null -> Message("Can't reach your library", error!!)
 
-            else -> {
-                Hero(item = spotlight, api = api, imageLoader = imageLoader)
+                movies == null || series == null -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator(color = K.Accent) }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(28.dp),
-                ) {
-                    // Reserves the top of the screen for the hero. The rows
-                    // scroll up over it, which is what gives the screen depth.
-                    item { Spacer(Modifier.height(360.dp)) }
+                movies!!.isEmpty() && series!!.isEmpty() -> Message(
+                    "Nothing here yet",
+                    "Drop video files into your Drive folder, then run a scan from the web app.",
+                )
 
-                    if (section != Section.Series && movies!!.isNotEmpty()) {
-                        item {
+                else -> {
+                    Hero(item = spotlight, api = api, imageLoader = imageLoader)
+
+                    // A plain scrolling Column, not a LazyColumn. With only a
+                    // few rows there is nothing to gain from laziness, and a
+                    // LazyColumn does not compose off-screen rows — so focus
+                    // search moving down would find no target and simply stop,
+                    // which is exactly the "can't move the page" symptom.
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(28.dp),
+                    ) {
+                        // Holds the top of the screen open for the hero. Rows
+                        // scroll up over it, which is what gives depth.
+                        Spacer(Modifier.height(330.dp))
+
+                        val showMovies = section != Section.Series && movies!!.isNotEmpty()
+                        val showSeries = section != Section.Movies && series!!.isNotEmpty()
+
+                        if (showMovies) {
                             CarouselRow(
                                 title = "Movies",
                                 items = movies!!,
@@ -109,11 +143,10 @@ fun HomeScreen(
                                 imageLoader = imageLoader,
                                 onSelect = onSelect,
                                 onFocusItem = { spotlight = it },
+                                firstItemFocusRequester = firstCard,
                             )
                         }
-                    }
-                    if (section != Section.Movies && series!!.isNotEmpty()) {
-                        item {
+                        if (showSeries) {
                             CarouselRow(
                                 title = "Series",
                                 items = series!!,
@@ -121,19 +154,16 @@ fun HomeScreen(
                                 imageLoader = imageLoader,
                                 onSelect = onSelect,
                                 onFocusItem = { spotlight = it },
+                                // Only when Movies isn't showing, so exactly
+                                // one card ever claims the initial focus.
+                                firstItemFocusRequester = if (showMovies) null else firstCard,
                             )
                         }
+                        Spacer(Modifier.height(40.dp))
                     }
-                    item { Spacer(Modifier.height(40.dp)) }
                 }
             }
         }
-
-        NavRail(
-            selected = section,
-            onSelect = { section = it },
-            modifier = Modifier.align(Alignment.CenterStart),
-        )
     }
 }
 
@@ -145,12 +175,8 @@ fun HomeScreen(
  */
 @Composable
 private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
-    Box(Modifier.fillMaxWidth().height(430.dp)) {
-        Crossfade(
-            targetState = item,
-            animationSpec = tween(320),
-            label = "heroArt",
-        ) { current ->
+    Box(Modifier.fillMaxWidth().height(420.dp)) {
+        Crossfade(targetState = item, animationSpec = tween(320), label = "heroArt") { current ->
             val art = current?.let { api.heroImageUrl(it.backdropPath, it.posterPath) }
             if (art != null) {
                 AsyncImage(
@@ -165,12 +191,12 @@ private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
             }
         }
 
-        // Two scrims, not one: vertical so the rows below sit on solid ground,
+        // Two scrims: vertical so the rows below sit on solid ground,
         // horizontal so the title stays readable over a busy left edge.
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to K.Ink.copy(alpha = 0.35f),
+                    0f to K.Ink.copy(alpha = 0.3f),
                     0.55f to K.Ink.copy(alpha = 0.75f),
                     1f to K.Ink,
                 )
@@ -179,8 +205,8 @@ private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
         Box(
             Modifier.fillMaxSize().background(
                 Brush.horizontalGradient(
-                    0f to K.Ink.copy(alpha = 0.92f),
-                    0.6f to K.Ink.copy(alpha = 0.1f),
+                    0f to K.Ink.copy(alpha = 0.9f),
+                    0.62f to K.Ink.copy(alpha = 0.08f),
                     1f to K.Ink.copy(alpha = 0f),
                 )
             )
@@ -190,8 +216,8 @@ private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
             Column(
                 Modifier
                     .align(Alignment.BottomStart)
-                    .padding(start = K.Gutter + K.RailCollapsed, bottom = 26.dp, end = K.Gutter)
-                    .fillMaxWidth(0.55f),
+                    .padding(start = K.Gutter, bottom = 24.dp, end = K.Gutter)
+                    .fillMaxWidth(0.58f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(

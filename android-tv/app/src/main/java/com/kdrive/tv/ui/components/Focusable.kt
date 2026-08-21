@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -56,6 +58,7 @@ fun FocusBox(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     cornerRadius: Int = 6,
+    focusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
@@ -78,11 +81,16 @@ fun FocusBox(
                 ),
                 shape,
             )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            // Must sit before the focus target below, or it observes nothing.
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .focusable(enabled)
+            // clickable() already creates a focus target. Adding focusable()
+            // as well produced two nested targets on one element, which is
+            // what broke D-pad traversal: focus search would land on the outer
+            // node and find no way onward.
             .clickable(
                 enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
@@ -109,6 +117,7 @@ fun ActionButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     primary: Boolean = true,
+    focusRequester: FocusRequester? = null,
     leading: (@Composable () -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -131,8 +140,8 @@ fun ActionButton(
         modifier = modifier
             .clip(shape)
             .background(background)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .focusable(enabled)
             .clickable(
                 enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },

@@ -1,6 +1,7 @@
 package com.kdrive.tv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,10 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,12 +45,19 @@ import com.kdrive.tv.ui.theme.K
  * One title, in full.
  *
  * Movies get artwork, a blurb and a single action. Series get the same plus a
- * season selector and an episode list, so the screen answers "what is this"
- * and "which one do I play" without a second navigation step.
+ * season picker and an episode list, so the screen answers "what is this" and
+ * "which one do I play" without a second navigation step.
  *
- * `onPlay` receives the id to stream and a label for the player to show: a
- * movie plays itself, an episode plays its own id, and this screen is the
- * only place that knows which.
+ * Everything scrolls in a plain Column rather than a LazyColumn. That is not
+ * a style preference: a LazyColumn does not compose items that are off-screen,
+ * so pressing down from the last visible episode found no focus target and
+ * the page simply refused to move. With every child composed, focus search
+ * always has somewhere to go and Compose scrolls the newly focused row into
+ * view on its own.
+ *
+ * `onPlay` receives the id to stream and a label for the player: a movie plays
+ * itself, an episode plays its own id, and this screen is the only place that
+ * knows which.
  */
 @Composable
 fun DetailScreen(
@@ -61,6 +70,11 @@ fun DetailScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var season by remember { mutableStateOf<Int?>(null) }
 
+    // Without an explicit claim nothing on this screen holds focus, and a
+    // screen with no focus ignores the remote completely.
+    val firstAction = remember { FocusRequester() }
+    var focusClaimed by remember { mutableStateOf(false) }
+
     LaunchedEffect(mediaId) {
         try {
             val loaded = api.getMedia(mediaId)
@@ -68,6 +82,13 @@ fun DetailScreen(
             season = loaded.seasons().firstOrNull()?.first
         } catch (e: Exception) {
             error = e.message ?: "Couldn't load this title"
+        }
+    }
+
+    LaunchedEffect(detail) {
+        if (detail != null && !focusClaimed) {
+            focusClaimed = true
+            runCatching { firstAction.requestFocus() }
         }
     }
 
@@ -88,37 +109,38 @@ fun DetailScreen(
                 val item = detail!!
                 Backdrop(item, api, imageLoader)
 
-                LazyColumn(Modifier.fillMaxSize()) {
-                    item { Spacer(Modifier.height(230.dp)) }
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                ) {
+                    Spacer(Modifier.height(210.dp))
 
-                    item {
-                        Column(
-                            Modifier.padding(horizontal = K.Gutter).fillMaxWidth(0.62f),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            Text(
-                                item.title,
-                                style = K.Hero,
-                                color = K.TextPrimary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                    Column(
+                        Modifier.padding(horizontal = K.Gutter).fillMaxWidth(0.62f),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Text(
+                            item.title,
+                            style = K.Hero,
+                            color = K.TextPrimary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(metaLine(item), style = K.Eyebrow, color = K.TextMuted)
+
+                        if (!item.description.isNullOrBlank()) {
+                            Text(item.description, style = K.Body, color = K.TextMuted)
+                        }
+
+                        if (!item.isSeries) {
+                            val playable = item.status != "processing" && item.driveFileId != null
+                            ActionButton(
+                                label = if (playable) "Play" else "Not available",
+                                enabled = playable,
+                                onClick = { onPlay(item.id, item.title) },
+                                leading = { PlayGlyph() },
+                                focusRequester = firstAction,
+                                modifier = Modifier.padding(top = 6.dp),
                             )
-                            Text(metaLine(item), style = K.Eyebrow, color = K.TextMuted)
-
-                            if (!item.description.isNullOrBlank()) {
-                                Text(item.description, style = K.Body, color = K.TextMuted)
-                            }
-
-                            if (!item.isSeries) {
-                                val playable = item.status != "processing" && item.driveFileId != null
-                                ActionButton(
-                                    label = if (playable) "Play" else "Not available",
-                                    enabled = playable,
-                                    onClick = { onPlay(item.id, item.title) },
-                                    leading = { PlayGlyph() },
-                                    modifier = Modifier.padding(top = 6.dp),
-                                )
-                            }
                         }
                     }
 
@@ -126,56 +148,60 @@ fun DetailScreen(
                         val seasons = item.seasons()
 
                         if (seasons.isEmpty()) {
-                            item {
-                                Text(
-                                    "No episodes yet. Add a file named like Show S01E01.mkv, then scan.",
-                                    style = K.Body,
-                                    color = K.TextMuted,
-                                    modifier = Modifier.padding(K.Gutter),
-                                )
-                            }
+                            Text(
+                                "No episodes yet. Add a file named like Show S01E01.mkv, then scan.",
+                                style = K.Body,
+                                color = K.TextMuted,
+                                modifier = Modifier.padding(K.Gutter),
+                            )
                         } else {
                             if (seasons.size > 1) {
-                                item {
-                                    SeasonPicker(
-                                        seasons = seasons.map { it.first },
-                                        selected = season,
-                                        onSelect = { season = it },
-                                        modifier = Modifier.padding(top = 26.dp),
+                                SeasonPicker(
+                                    seasons = seasons.map { it.first },
+                                    selected = season,
+                                    onSelect = { season = it },
+                                    modifier = Modifier.padding(top = 26.dp),
+                                )
+                            }
+
+                            val shown = seasons.firstOrNull { it.first == season } ?: seasons.first()
+
+                            Text(
+                                "Season ${shown.first}",
+                                style = K.Section,
+                                color = K.TextPrimary,
+                                modifier = Modifier.padding(
+                                    start = K.Gutter,
+                                    top = 26.dp,
+                                    bottom = 12.dp,
+                                ),
+                            )
+
+                            Column(
+                                Modifier.focusGroup(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                shown.second.forEachIndexed { index, episode ->
+                                    EpisodeRow(
+                                        episode = episode,
+                                        onPlay = {
+                                            onPlay(
+                                                episode.id,
+                                                "${item.title}  ·  ${episode.label}",
+                                            )
+                                        },
+                                        // With no Play button above, the first
+                                        // episode is the screen's entry point.
+                                        focusRequester =
+                                            if (index == 0 && seasons.size == 1) firstAction else null,
+                                        modifier = Modifier.padding(horizontal = K.Gutter),
                                     )
                                 }
-                            }
-
-                            val shown = seasons.firstOrNull { it.first == season }
-                                ?: seasons.first()
-
-                            item {
-                                Text(
-                                    "Season ${shown.first}",
-                                    style = K.Section,
-                                    color = K.TextPrimary,
-                                    modifier = Modifier.padding(
-                                        start = K.Gutter,
-                                        top = 26.dp,
-                                        bottom = 12.dp,
-                                    ),
-                                )
-                            }
-
-                            items(shown.second, key = { it.id }) { episode ->
-                                EpisodeRow(
-                                    episode = episode,
-                                    onPlay = { onPlay(episode.id, "${item.title}  ·  ${episode.label}") },
-                                    modifier = Modifier.padding(
-                                        horizontal = K.Gutter,
-                                        vertical = 5.dp,
-                                    ),
-                                )
                             }
                         }
                     }
 
-                    item { Spacer(Modifier.height(48.dp)) }
+                    Spacer(Modifier.height(48.dp))
                 }
             }
         }
@@ -186,7 +212,7 @@ fun DetailScreen(
 private fun Backdrop(item: MediaDetail, api: ApiClient, imageLoader: ImageLoader) {
     val art = api.heroImageUrl(item.backdropPath, item.posterPath)
 
-    Box(Modifier.fillMaxWidth().height(460.dp)) {
+    Box(Modifier.fillMaxWidth().height(440.dp)) {
         if (art != null) {
             AsyncImage(
                 model = art,
@@ -225,12 +251,15 @@ private fun SeasonPicker(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .focusGroup()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = K.Gutter),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = K.Gutter),
     ) {
-        items(seasons, key = { it }) { number ->
+        seasons.forEach { number ->
             ActionButton(
                 label = "Season $number",
                 onClick = { onSelect(number) },
@@ -241,14 +270,15 @@ private fun SeasonPicker(
 }
 
 /**
- * One episode. The number is set apart in the accent-free faint grey so the
- * eye can run down the column and count, and the title carries the weight.
+ * One episode. The number is set apart in faint grey so the eye can run down
+ * the column and count, and the title carries the weight.
  */
 @Composable
 private fun EpisodeRow(
     episode: Episode,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
 ) {
     val playable = episode.driveFileId != null
 
@@ -256,6 +286,7 @@ private fun EpisodeRow(
         onClick = onPlay,
         enabled = playable,
         cornerRadius = 5,
+        focusRequester = focusRequester,
         modifier = modifier.fillMaxWidth(),
     ) { focused ->
         Row(
@@ -309,8 +340,6 @@ private fun EpisodeRow(
 
 @Composable
 private fun PlayGlyph() {
-    // A triangle drawn from three stacked bars would be fussier than this is
-    // worth; the character reads correctly at distance and costs no asset.
     Text("▶", style = K.CardTitle, color = K.Ink)
 }
 
