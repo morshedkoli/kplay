@@ -19,10 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import androidx.tv.foundation.lazy.grid.TvGridCells
-import androidx.tv.foundation.lazy.grid.TvGridItemSpan
-import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
-import androidx.tv.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.tv.material3.Card
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text as TvText
@@ -32,7 +32,7 @@ import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.MediaItem
 
 /**
- * TV-focusable poster grid, D-pad navigable (TvLazyVerticalGrid handles focus
+ * TV-focusable poster grid, D-pad navigable (LazyVerticalGrid handles focus
  * movement between cells natively). Mirrors app/LibraryGrid.js, except both
  * halves of the library are shown here as two labelled sections rather than
  * as separate /movies and /series routes — a TV user shouldn't have to
@@ -71,20 +71,20 @@ fun BrowseScreen(
         isEmpty -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Nothing here yet — add files to your Drive folder, then scan from the web app.")
         }
-        else -> TvLazyVerticalGrid(
-            columns = TvGridCells.Fixed(COLUMNS),
+        else -> LazyVerticalGrid(
+            columns = GridCells.Fixed(COLUMNS),
             modifier = Modifier.fillMaxSize().padding(32.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (movies!!.isNotEmpty()) {
-                item(span = { TvGridItemSpan(COLUMNS) }) { SectionHeading("Movies") }
+                item(span = { GridItemSpan(COLUMNS) }) { SectionHeading("Movies") }
                 items(movies!!) { item ->
                     PosterCard(item, api, imageLoader) { onSelect(item) }
                 }
             }
             if (series!!.isNotEmpty()) {
-                item(span = { TvGridItemSpan(COLUMNS) }) { SectionHeading("Series") }
+                item(span = { GridItemSpan(COLUMNS) }) { SectionHeading("Series") }
                 items(series!!) { item ->
                     PosterCard(item, api, imageLoader) { onSelect(item) }
                 }

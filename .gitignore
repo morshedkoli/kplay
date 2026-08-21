@@ -5,3 +5,9 @@ node_modules/
 .superpowers/
 .claude/
 .env.production
+
+# Android SDK path — machine-specific, never committed
+android-tv/local.properties
+android-tv/.gradle/
+android-tv/build/
+android-tv/app/build/
