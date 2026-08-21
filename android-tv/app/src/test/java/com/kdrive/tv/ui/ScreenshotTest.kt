@@ -18,6 +18,10 @@ import com.kdrive.tv.data.Credentials
 import com.kdrive.tv.data.Episode
 import com.kdrive.tv.data.MediaDetail
 import com.kdrive.tv.data.MediaItem
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
+import com.kdrive.tv.ui.theme.K
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,6 +83,32 @@ class ScreenshotTest {
         status = "matched",
         episodeCount = episodes,
     )
+
+    /** The transport, mid-scrub: bar previewing a wound-to position and the
+     * offset badge showing how far. */
+    @Test
+    fun `player controls`() {
+        rule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Box(Modifier.fillMaxSize().background(K.Ink), contentAlignment = Alignment.BottomStart) {
+                    Controls(
+                        title = "My Brilliant Career  ·  S01E02",
+                        position = downTo(14, 20),
+                        buffered = downTo(21, 5),
+                        duration = downTo(48, 30),
+                        isPlaying = true,
+                        seekTargetMs = downTo(16, 50),
+                    )
+                }
+            }
+        }
+        rule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/player-controls.png",
+            roborazziOptions = RoborazziOptions(),
+        )
+    }
+
+    private fun downTo(minutes: Int, seconds: Int) = (minutes * 60L + seconds) * 1000L
 
     @Test
     fun browse() {

@@ -67,6 +67,11 @@ private const val SEEK_JUMP_MS = 30_000L
  * picture without the user having to dismiss them. */
 private const val CONTROLS_TIMEOUT_MS = 4_000L
 
+/** How long the keys must be quiet before a wound-to position is committed.
+ * Long enough to collect a burst of presses, short enough that a deliberate
+ * single press does not feel laggy. */
+private const val SEEK_COMMIT_DELAY_MS = 450L
+
 /**
  * Full-screen playback with a remote-driven transport.
  *
@@ -74,10 +79,15 @@ private const val CONTROLS_TIMEOUT_MS = 4_000L
  * D-pad, so the overlay here is ours and every key is handled explicitly:
  *
  *   Centre / Enter / Play-Pause  toggle playback
- *   Left / Right                 seek ∓10s
- *   Rewind / Fast-forward        seek ∓30s
+ *   Left / Right                 wind ∓10s, accumulating
+ *   Rewind / Fast-forward        wind ∓30s, accumulating
  *   Up                           show the controls
  *   Down / Back                  hide the controls, then leave
+ *
+ * Seeking accumulates the way it does on a phone: presses move a target that
+ * the scrubber previews, and the player is told once, after the keys go
+ * quiet. Holding a key therefore scrubs smoothly instead of stuttering
+ * through a seek per repeat.
  *
  * `mediaId` is whatever is playing — a media _id for a movie, an episode _id
  * for an episode. Position is saved under that same id, so the web player
@@ -114,7 +124,14 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(true) }
     var position by remember { mutableLongStateOf(0L) }
+    var buffered by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
+    // Non-null while the user is scrubbing: the position they have wound to
+    // but not yet committed.
+    var seekTargetMs by remember { mutableStateOf<Long?>(null) }
+    // Brief play/pause flash in the centre of the screen, as confirmation that
+    // the keypress registered even when the controls are hidden.
+    var showActionGlyph by remember { mutableStateOf(false) }
     // Bumped on every keypress; the auto-hide timer restarts whenever it
     // changes, which is simpler than cancelling and re-launching a job.
     var lastInteraction by remember { mutableLongStateOf(0L) }
@@ -154,9 +171,27 @@ fun PlayerScreen(
     LaunchedEffect(player) {
         while (isActive) {
             position = player.currentPosition.coerceAtLeast(0L)
+            buffered = player.bufferedPosition.coerceAtLeast(0L)
             duration = player.duration.coerceAtLeast(0L)
-            delay(500)
+            delay(250)
         }
+    }
+
+    // Commits the wound-to position once the keys go quiet. Restarting on
+    // every change is the debounce: hold the key and this simply never fires
+    // until you let go.
+    LaunchedEffect(seekTargetMs) {
+        val target = seekTargetMs ?: return@LaunchedEffect
+        delay(SEEK_COMMIT_DELAY_MS)
+        player.seekTo(target)
+        position = target
+        seekTargetMs = null
+    }
+
+    LaunchedEffect(showActionGlyph) {
+        if (!showActionGlyph) return@LaunchedEffect
+        delay(600)
+        showActionGlyph = false
     }
 
     LaunchedEffect(mediaId) {
@@ -180,16 +215,29 @@ fun PlayerScreen(
         onDispose { player.release() }
     }
 
+    /**
+     * Accumulates a seek instead of performing one per keypress.
+     *
+     * Pressing right four times should move forty seconds, and the obvious
+     * implementation — seek to currentPosition + 10s each time — does not do
+     * that: every press reads a position the earlier seeks have not settled
+     * into yet, so the presses overwrite each other and the picture lands ten
+     * seconds away no matter how many times the key was hit.
+     *
+     * So each press only moves a target, the scrubber previews it, and the
+     * player is told once the user stops pressing. That is also what makes a
+     * held key scrub smoothly rather than stutter through repeated seeks.
+     */
     fun seekBy(deltaMs: Long) {
-        val target = (player.currentPosition + deltaMs)
-            .coerceIn(0L, if (player.duration > 0) player.duration else Long.MAX_VALUE)
-        player.seekTo(target)
-        position = target
+        val from = seekTargetMs ?: player.currentPosition
+        val limit = if (player.duration > 0) player.duration else Long.MAX_VALUE
+        seekTargetMs = (from + deltaMs).coerceIn(0L, limit)
         touch()
     }
 
     fun togglePlay() {
         if (player.isPlaying) player.pause() else player.play()
+        showActionGlyph = true
         touch()
     }
 
@@ -261,6 +309,24 @@ fun PlayerScreen(
             }
         }
 
+        if (showActionGlyph && !buffering) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .size(84.dp)
+                        .clip(RoundedCornerShape(42.dp))
+                        .background(K.Scrim.copy(alpha = 0.62f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (isPlaying) "▶" else "❚❚",
+                        style = K.PageTitle,
+                        color = K.TextPrimary,
+                    )
+                }
+            }
+        }
+
         AnimatedVisibility(
             visible = controlsVisible,
             enter = fadeIn(),
@@ -270,20 +336,28 @@ fun PlayerScreen(
             Controls(
                 title = title,
                 position = position,
+                buffered = buffered,
                 duration = duration,
                 isPlaying = isPlaying,
+                seekTargetMs = seekTargetMs,
             )
         }
     }
 }
 
 @Composable
-private fun Controls(
+internal fun Controls(
     title: String?,
     position: Long,
+    buffered: Long,
     duration: Long,
     isPlaying: Boolean,
+    seekTargetMs: Long?,
 ) {
+    // While scrubbing the bar and the clock show where you are winding to,
+    // not where playback still is — otherwise the numbers argue with the
+    // thumbnail the user is steering by.
+    val shown = seekTargetMs ?: position
     Column(
         Modifier
             .fillMaxWidth()
@@ -305,23 +379,34 @@ private fun Controls(
             )
         }
 
-        Scrubber(position = position, duration = duration)
+        Scrubber(position = shown, buffered = buffered, duration = duration, scrubbing = seekTargetMs != null)
 
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "${formatTime(position)}  /  ${formatTime(duration)}",
-                style = K.Body,
-                color = K.TextMuted,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "${formatTime(shown)}  /  ${formatTime(duration)}",
+                    style = K.Body,
+                    color = K.TextPrimary,
+                )
+                if (seekTargetMs != null) {
+                    val offset = seekTargetMs - position
+                    Text(
+                        (if (offset >= 0) "+" else "−") + formatTime(kotlin.math.abs(offset)),
+                        style = K.Body,
+                        color = K.Accent,
+                    )
+                }
+            }
             // A legend rather than buttons: the remote already has these keys,
             // and focusable on-screen buttons would steal the arrow keys that
             // seeking needs.
             Text(
-                if (isPlaying) "OK PAUSE   ◀ ▶ 10s" else "OK PLAY   ◀ ▶ 10s",
+                if (isPlaying) "OK  PAUSE      ◀ ▶  10s      ◀◀ ▶▶  30s"
+                else "OK  PLAY      ◀ ▶  10s      ◀◀ ▶▶  30s",
                 style = K.Eyebrow,
                 color = K.TextFaint,
             )
@@ -330,20 +415,30 @@ private fun Controls(
 }
 
 @Composable
-private fun Scrubber(position: Long, duration: Long) {
-    val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+private fun Scrubber(position: Long, buffered: Long, duration: Long, scrubbing: Boolean) {
+    val played = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+    val ahead = if (duration > 0) (buffered.toFloat() / duration).coerceIn(0f, 1f) else 0f
 
     Box(
         Modifier
             .fillMaxWidth()
-            .height(5.dp)
-            .clip(RoundedCornerShape(3.dp))
+            .height(if (scrubbing) 8.dp else 5.dp)
+            .clip(RoundedCornerShape(4.dp))
             .background(K.TextPrimary.copy(alpha = 0.22f)),
     ) {
+        // What has downloaded, behind what has played — the same three-layer
+        // bar every streaming player uses, and the only honest way to show
+        // that a seek past this point will have to buffer.
         Box(
             Modifier
                 .fillMaxHeight()
-                .fillMaxWidth(fraction)
+                .fillMaxWidth(ahead)
+                .background(K.TextPrimary.copy(alpha = 0.35f)),
+        )
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(played)
                 .background(K.Accent),
         )
     }
