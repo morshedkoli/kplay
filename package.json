@@ -1,0 +1,33 @@
+{
+  "name": "kdrive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KDrive — full-stack Next.js app: web client and API in one deployment. See PRD.md.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "migrate": "node lib/migrations/001-indexes.js",
+    "test": "node --test \"lib/**/*.test.js\"",
+    "test:db": "node scripts/test-db.js",
+    "test:gdrive": "node scripts/test-gdrive.js",
+    "test:tmdb": "node scripts/test-tmdb.js",
+    "show:indexes": "node scripts/show-indexes.js"
+  },
+  "dependencies": {
+    "googleapis": "^142.0.0",
+    "mongodb": "^6.9.0",
+    "next": "^15.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

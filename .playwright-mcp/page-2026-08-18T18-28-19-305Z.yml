@@ -1,0 +1,51 @@
+- generic [active] [ref=f8e1]:
+  - banner [ref=f8e2]:
+    - navigation [ref=f8e3]:
+      - link "K KDrive" [ref=f8e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f8e5]: K
+        - generic [ref=f8e6]: KDrive
+      - generic [ref=f8e7]:
+        - link "Gallery" [ref=f8e8] [cursor=pointer]:
+          - /url: /
+        - link "Upload" [ref=f8e12] [cursor=pointer]:
+          - /url: /upload
+        - link "Storage" [ref=f8e16] [cursor=pointer]:
+          - /url: /storage
+      - button "Sign out" [ref=f8e20] [cursor=pointer]
+  - main [ref=f8e21]:
+    - generic [ref=f8e33]:
+      - generic [ref=f8e34]:
+        - generic [ref=f8e35]: r2
+        - generic [ref=f8e36]: unknown
+      - generic [ref=f8e37]:
+        - generic [ref=f8e38]: mega
+        - generic [ref=f8e39]: 20 GB free · 0%
+      - generic [ref=f8e40]:
+        - generic [ref=f8e41]: pcloud
+        - generic [ref=f8e42]: 3.9 GB free · 2%
+      - generic [ref=f8e43]:
+        - generic [ref=f8e44]: gdrive
+        - generic [ref=f8e45]: 5.0 TB free · 0%
+      - generic [ref=f8e46]:
+        - generic [ref=f8e47]: dropbox
+        - generic [ref=f8e48]: 2.0 GB free · 0%
+    - generic [ref=f8e22]:
+      - button "All2" [ref=f8e49] [cursor=pointer]
+      - button "Uploaded1" [ref=f8e50] [cursor=pointer]
+      - button "Pending1" [ref=f8e51] [cursor=pointer]
+      - button "Failed0" [ref=f8e52] [cursor=pointer]
+      - generic [ref=f8e53]: 120 MB backed up
+    - generic [ref=f8e27]:
+      - button "video mid-test.mp4 pending" [ref=f8e54] [cursor=pointer]:
+        - generic [ref=f8e55]: video
+        - generic:
+          - paragraph: mid-test.mp4
+        - generic [ref=f8e59]: pending
+      - button "WhatsApp Image 2026-08-14 at 20.54.27.jpeg WhatsApp Image 2026-08-14 at 20.54.27.jpeg pool" [ref=f8e61] [cursor=pointer]:
+        - img "WhatsApp Image 2026-08-14 at 20.54.27.jpeg" [ref=f8e62]
+        - generic:
+          - paragraph: WhatsApp Image 2026-08-14 at 20.54.27.jpeg
+        - generic [ref=f8e63]: pool
+  - button "Open Next.js Dev Tools" [ref=f8e69] [cursor=pointer]
+  - alert [ref=f8e73]

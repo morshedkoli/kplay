@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #09090b;
+  --surface: #17171a;
+  --surface-raised: #202024;
+  --border: #2a2a2e;
+  --ink: #f4f4f5;
+  --ink-soft: #9c9ca3;
+  --accent: #e0464a;
+  --accent-soft: #3a1516;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--border) 25%, var(--surface) 37%, var(--border) 63%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.animate-indeterminate {
+  animation: indeterminate 1.1s ease-in-out infinite;
+}

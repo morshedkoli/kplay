@@ -1,0 +1,23 @@
+- generic [ref=f6e1]:
+  - banner [ref=f6e2]:
+    - navigation [ref=f6e3]:
+      - link "K KDrive" [ref=f6e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f6e5]: K
+        - generic [ref=f6e6]: KDrive
+      - generic [ref=f6e7]:
+        - link "Gallery" [ref=f6e8] [cursor=pointer]:
+          - /url: /
+        - link "Upload" [ref=f6e12] [cursor=pointer]:
+          - /url: /upload
+        - link "Storage" [ref=f6e16] [cursor=pointer]:
+          - /url: /storage
+      - button "Sign out" [ref=f6e20] [cursor=pointer]
+  - main [ref=f6e21]:
+    - generic [ref=f6e22]:
+      - generic [ref=f6e23]: K
+      - heading "KDrive" [level=1] [ref=f6e24]
+      - paragraph [ref=f6e25]: Sign in to browse your backups.
+      - generic [ref=f6e26]:
+        - textbox "Admin password" [active] [ref=f6e27]
+        - button "Sign in" [disabled] [ref=f6e28]

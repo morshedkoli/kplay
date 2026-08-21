@@ -1,0 +1,30 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e13] [cursor=pointer]
+  - alert [ref=e17]
+  - banner [ref=e18]:
+    - navigation [ref=e19]:
+      - link "KDrive" [ref=e20] [cursor=pointer]:
+        - /url: /
+      - link "Gallery" [ref=e21] [cursor=pointer]:
+        - /url: /
+      - link "Upload" [ref=e22] [cursor=pointer]:
+        - /url: /upload
+      - link "Storage" [ref=e23] [cursor=pointer]:
+        - /url: /storage
+      - button "Sign out" [ref=e24] [cursor=pointer]
+  - main [ref=e25]:
+    - generic [ref=e26]:
+      - heading "Upload Photos & Videos" [level=1] [ref=e27]
+      - button "Clear finished (1)" [ref=e52] [cursor=pointer]
+    - generic [ref=e28] [cursor=pointer]:
+      - paragraph [ref=e32]: Drop photos or videos here, or browse
+      - paragraph [ref=e33]: Hashed client-side, automatic deduplication, uploaded to multi-cloud pool.
+    - list [ref=e37]:
+      - listitem [ref=e38]:
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - generic [ref=e41]:
+              - generic "test.png" [ref=e42]
+              - generic [ref=e43]: 68 B
+            - paragraph [ref=e53]: stored on pool
+          - generic [ref=e47]: done

@@ -1,0 +1,25 @@
+- generic [active] [ref=f3e1]:
+  - banner [ref=f3e2]:
+    - navigation [ref=f3e3]:
+      - link "K KDrive" [ref=f3e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f3e5]: K
+        - generic [ref=f3e6]: KDrive
+      - generic [ref=f3e7]:
+        - link "Gallery" [ref=f3e8] [cursor=pointer]:
+          - /url: /
+        - link "Upload" [ref=f3e12] [cursor=pointer]:
+          - /url: /upload
+        - link "Storage" [ref=f3e16] [cursor=pointer]:
+          - /url: /storage
+      - button "Sign out" [ref=f3e20] [cursor=pointer]
+  - main [ref=f3e21]:
+    - generic [ref=f3e22]:
+      - button "All" [ref=f3e23] [cursor=pointer]
+      - button "Uploaded" [ref=f3e24] [cursor=pointer]
+      - button "Pending" [ref=f3e25] [cursor=pointer]
+      - button "Failed" [ref=f3e26] [cursor=pointer]
+    - generic [ref=f3e27]:
+      - paragraph [ref=f3e31]: Nothing backed up yet.
+      - link "Go to Upload →" [ref=f3e32] [cursor=pointer]:
+        - /url: /upload

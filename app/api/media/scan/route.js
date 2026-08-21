@@ -1,0 +1,76 @@
+// POST /api/media/scan — imports files you dropped into the Drive folder
+// yourself.
+//
+// This replaces the old upload route. Nothing here touches file bytes: it
+// lists the folder, skips anything already in the library, and runs the same
+// filename -> TMDb -> Mongo pipeline an upload used to trigger. Metadata only,
+// so it finishes in seconds even for a large folder and fits well inside a
+// serverless function's time limit.
+
+import { requireDeviceOrSession } from '@/lib/auth.js';
+import { listFolderFiles } from '@/lib/gdrive.js';
+import { matchAndStore } from '@/lib/library/match.js';
+import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+// Anything Drive reports as a non-video type is skipped rather than imported
+// as an unmatched title — a stray PDF in the folder shouldn't become a movie.
+function isVideo(file) {
+  return file.mimeType?.startsWith('video/');
+}
+
+/** Every driveFileId already represented in the library, movies and episodes. */
+async function knownDriveFileIds() {
+  const [media, episodes] = [await mediaCollection(), await episodeCollection()];
+  const [mediaIds, episodeIds] = await Promise.all([
+    media.distinct('driveFileId'),
+    episodes.distinct('driveFileId'),
+  ]);
+  return new Set([...mediaIds, ...episodeIds].filter(Boolean));
+}
+
+export async function POST(request) {
+  const authError = await requireDeviceOrSession(request);
+  if (authError) return authError;
+
+  let files;
+  try {
+    files = await listFolderFiles();
+  } catch (err) {
+    console.error('[api/media/scan] Drive list failed', err);
+    return Response.json({ error: 'Could not read the Drive folder' }, { status: 502 });
+  }
+
+  const known = await knownDriveFileIds();
+  const pending = files.filter((f) => isVideo(f) && !known.has(f.driveFileId));
+
+  const imported = [];
+  const failed = [];
+
+  // Sequential on purpose: TMDb rate-limits, and series episodes must be
+  // matched one at a time or two episodes of the same show race to create
+  // duplicate parent docs.
+  for (const file of pending) {
+    try {
+      const result = await matchAndStore({
+        filename: file.name,
+        driveFileId: file.driveFileId,
+        size: file.size,
+      });
+      imported.push({ filename: file.name, status: result.status, type: result.type });
+    } catch (err) {
+      // One bad file shouldn't abort the whole scan — report it and continue.
+      console.error(`[api/media/scan] failed to import "${file.name}"`, err);
+      failed.push({ filename: file.name, error: err.message });
+    }
+  }
+
+  return Response.json({
+    scanned: files.length,
+    skipped: files.length - pending.length,
+    imported,
+    failed,
+  });
+}

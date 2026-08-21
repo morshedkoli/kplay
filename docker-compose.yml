@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    image: kdrive:latest
+    restart: unless-stopped
+    # Bound to loopback: nginx on the host is the only thing that should reach
+    # the app. Publishing on 0.0.0.0 would let anyone hit it over plain HTTP
+    # and bypass TLS.
+    #
+    # Host port is 3100, not 3000: this VPS already runs another Next.js app
+    # (koliDrive, on murshedkoli.me) which occupies the default. Only the host
+    # side moves — the container still listens on 3000, so the healthcheck and
+    # the Dockerfile's PORT stay as they are. Keep this in sync with
+    # `server 127.0.0.1:3100` in deploy/nginx/kdrive.conf.
+    ports:
+      - '127.0.0.1:3100:3000'
+    env_file:
+      - .env.production
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

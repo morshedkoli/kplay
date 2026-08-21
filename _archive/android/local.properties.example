@@ -1,0 +1,6 @@
+# Copy this to local.properties (gitignored) and fill in real values.
+# sdk.dir is normally auto-written by Android Studio on first open — leave
+# it alone if Android Studio already set it.
+
+bhandar.backend.url=http://10.0.2.2:3000
+bhandar.device.key=changeme-must-match-backend-BHANDAR_DEVICE_KEY

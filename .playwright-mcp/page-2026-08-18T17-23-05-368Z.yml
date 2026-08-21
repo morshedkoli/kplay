@@ -1,0 +1,9 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - heading "KDrive" [level=1] [ref=e3]
+    - paragraph [ref=e4]: Sign in to browse your backups.
+    - generic [ref=e5]:
+      - textbox "Admin password" [active] [ref=e6]: kdrive-admin-local
+      - button "Sign in" [ref=e7] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e13] [cursor=pointer]
+  - alert [ref=e17]

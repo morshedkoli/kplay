@@ -1,0 +1,6 @@
+- main [ref=e2]:
+  - heading "KDrive" [level=1] [ref=e3]
+  - paragraph [ref=e4]: Sign in to browse your backups.
+  - generic [ref=e5]:
+    - textbox "Admin password" [active] [ref=e6]
+    - button "Sign in" [disabled] [ref=e7]
