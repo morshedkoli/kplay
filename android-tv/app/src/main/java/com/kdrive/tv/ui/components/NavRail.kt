@@ -119,7 +119,7 @@ private fun Brand(expanded: Boolean) {
         ) {
             Text("K", style = K.Section, color = K.TextPrimary)
         }
-        if (expanded) Text("KDrive", style = K.Section, color = K.TextPrimary)
+        if (expanded) Text("kPlay", style = K.Section, color = K.TextPrimary)
     }
 }
 

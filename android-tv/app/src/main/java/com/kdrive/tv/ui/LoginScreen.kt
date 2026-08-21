@@ -39,7 +39,7 @@ fun LoginScreen(
         modifier = Modifier.fillMaxSize().background(K.Ink).padding(64.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("KDrive", style = K.Hero, color = K.TextPrimary)
+        Text("kPlay", style = K.Hero, color = K.TextPrimary)
         Text(
             "Enter your KDrive server address and device key.",
             style = K.Body,
