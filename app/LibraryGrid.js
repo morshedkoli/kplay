@@ -5,21 +5,24 @@
 // — and which detail route its tiles link into.
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import SyncButton, { LIBRARY_UPDATED_EVENT } from './SyncButton.js';
 
 const COPY = {
   movie: {
     heading: 'Movies',
     basePath: '/movies',
     empty: 'No movies in the catalog yet.',
-    addLabel: 'Add your first movie →',
+    // The naming rule used to live on the /add page; it belongs wherever
+    // someone is about to sync an empty library for the first time.
+    hint: 'Drop files in your Drive folder named like “Inception 2010.mkv”, then sync.',
     noun: (n) => `${n} ${n === 1 ? 'movie' : 'movies'}`,
   },
   series: {
     heading: 'Series',
     basePath: '/series',
     empty: 'No series in the catalog yet.',
-    addLabel: 'Add your first episode →',
+    hint: 'Drop files in your Drive folder named like “Show 1x02.mkv”, then sync.',
     noun: (n) => `${n} ${n === 1 ? 'series' : 'series'}`,
   },
 };
@@ -105,27 +108,33 @@ export default function LibraryGrid({ kind }) {
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/media/list');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // The response splits by type already; fall back to filtering `items`
+      // so an older/newer response shape still renders.
+      const list = data[kind === 'movie' ? 'movies' : 'series'];
+      setItems(list ?? (data.items ?? []).filter((i) => i.type === kind));
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [kind]);
+
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/media/list')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        if (cancelled) return;
-        // The response splits by type already; fall back to filtering `items`
-        // so an older/newer response shape still renders.
-        const list = data[kind === 'movie' ? 'movies' : 'series'];
-        setItems(list ?? (data.items ?? []).filter((i) => i.type === kind));
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message);
-      });
+    // The sidebar's Sync button lives outside this tree, so it announces a
+    // finished import on the window rather than through props.
+    const onUpdated = () => !cancelled && load();
+    load();
+    window.addEventListener(LIBRARY_UPDATED_EVENT, onUpdated);
     return () => {
       cancelled = true;
+      window.removeEventListener(LIBRARY_UPDATED_EVENT, onUpdated);
     };
-  }, [kind]);
+  }, [load]);
 
   const filtered = useMemo(() => {
     if (!items) return [];
@@ -149,12 +158,6 @@ export default function LibraryGrid({ kind }) {
           placeholder="Filter by title…"
           className="ml-auto w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--ink)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
         />
-        <Link
-          href="/add"
-          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
-        >
-          Add media
-        </Link>
       </div>
 
       {error ? (
@@ -170,9 +173,8 @@ export default function LibraryGrid({ kind }) {
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-20 text-center">
           <p className="text-sm text-[var(--ink-soft)]">{copy.empty}</p>
-          <Link href="/add" className="text-sm font-medium text-[var(--accent)] hover:underline">
-            {copy.addLabel}
-          </Link>
+          <p className="max-w-sm text-xs text-[var(--ink-soft)]">{copy.hint}</p>
+          <SyncButton variant="link" />
         </div>
       ) : filtered.length === 0 ? (
         <p className="py-20 text-center text-sm text-[var(--ink-soft)]">

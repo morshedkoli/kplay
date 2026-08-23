@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import SyncButton from './SyncButton.js';
 
 const LINKS = [
   {
@@ -25,11 +26,6 @@ const LINKS = [
         d="M4 8h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Zm4-4 4 4m4-4-4 4"
       />
     ),
-  },
-  {
-    href: '/add',
-    label: 'Add Media',
-    icon: <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M5 20h14" />,
   },
   {
     href: '/admin/usage',
@@ -93,10 +89,14 @@ export default function Sidebar() {
         })}
       </nav>
 
+      {/* An action, not a destination — it updates whichever section you are
+          already looking at, so it sits below the links rather than among them. */}
+      <SyncButton />
+
       <button
         type="button"
         onClick={signOut}
-        className="mx-2 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--ink-soft)] transition hover:bg-[var(--surface-raised)] hover:text-[var(--ink)]"
+        className="mx-2 mt-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--ink-soft)] transition hover:bg-[var(--surface-raised)] hover:text-[var(--ink)]"
       >
         <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />

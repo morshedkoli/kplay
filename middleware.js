@@ -33,5 +33,5 @@ export function middleware(request) {
 export const config = {
   // Pages only. API routes do their own auth and must be able to answer 401
   // to an API client rather than redirect it to an HTML login page.
-  matcher: ['/', '/movies', '/movies/:path*', '/series', '/series/:path*', '/add', '/admin/:path*'],
+  matcher: ['/', '/movies', '/movies/:path*', '/series', '/series/:path*', '/admin/:path*'],
 };
