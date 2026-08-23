@@ -9,7 +9,7 @@
 
 import { requireDeviceOrSession } from '@/lib/auth.js';
 import { listFolderFiles } from '@/lib/gdrive.js';
-import { matchAndStore } from '@/lib/library/match.js';
+import { matchAndStore, rematchUnmatchedMovies } from '@/lib/library/match.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 
 export const runtime = 'nodejs';
@@ -67,10 +67,21 @@ export async function POST(request) {
     }
   }
 
+  // Items already in the library are skipped above, so anything that missed
+  // TMDb on an earlier scan needs an explicit second chance here.
+  let rematched = [];
+  try {
+    rematched = await rematchUnmatchedMovies();
+  } catch (err) {
+    // A rematch failure is not a scan failure — the import above still stands.
+    console.error('[api/media/scan] rematch pass failed', err);
+  }
+
   return Response.json({
     scanned: files.length,
     skipped: files.length - pending.length,
     imported,
+    rematched,
     failed,
   });
 }
