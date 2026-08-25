@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,6 +52,11 @@ enum class Section(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Filled.Home),
     Movies("Movies", Icons.Filled.PlayArrow),
     Series("Series", Icons.Filled.List),
+
+    // An entry that navigates away rather than filtering the rows below it.
+    // HomeScreen treats it as an action, so it never becomes the selected
+    // section and the rail never sits on a state the content cannot show.
+    Settings("Settings", Icons.Filled.Settings),
 }
 
 /**

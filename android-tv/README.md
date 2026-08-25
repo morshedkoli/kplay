@@ -5,8 +5,13 @@ everything in your kPlay library — movies and series alike.
 
 ## What this is
 
-- **Login** — enter your kPlay server URL and device key (`KDRIVE_DEVICE_KEY` from your server's
-  env). Validated against `GET /api/media/list` before saving.
+- **No setup screen** — the server URL is compiled in (`https://kplay-lemon.vercel.app`) and so is
+  the device key, so the app opens straight into the library. A build that was given no device key
+  falls back to asking for both on first launch; see *Build-time configuration* below.
+- **App lock** — off by default. Turn it on in **Settings** and pick a four-digit PIN; kPlay then
+  asks for it every time it opens, including on return from the home screen. The PIN is stored
+  salted and re-hashed 50,000 times, but four digits is ten thousand possibilities: this keeps the
+  household out, not someone holding the device.
 - **Browse** — a D-pad-navigable poster grid from `GET /api/media/list`, showing **Movies** and
   **Series** as two labelled sections. Series tiles carry an episode count. Posters load straight
   from TMDb's public CDN, with no auth header sent to it.
@@ -35,6 +40,27 @@ Auth is the same `x-kdrive-device-key` header the server accepts for non-browser
 
 Uploading media is not part of this app. Files go into the Drive folder directly; **Sync** in the
 nav rail imports them.
+
+## Build-time configuration
+
+Two values are compiled into the APK.
+
+`kdriveServerUrl` defaults to `https://kplay-lemon.vercel.app` and is committed — a public URL is
+not a secret, and baking it in is what removes the setup screen.
+
+`kdriveDeviceKey` has no default, because it is your server's `KDRIVE_DEVICE_KEY` and does not
+belong in this repository. Supply it one of three ways, checked in this order:
+
+1. `-PkdriveDeviceKey=…` on the Gradle command line,
+2. `KDRIVE_DEVICE_KEY` in the environment,
+3. a `kdriveDeviceKey=…` line in `android-tv/local.properties`, which is gitignored.
+
+For CI, add the same value as a repository secret named `KDRIVE_DEVICE_KEY` — the workflow passes
+it through. Without it the build still succeeds; the app just asks for a URL and key on first
+launch instead.
+
+A baked key is readable inside the APK by anyone who has the file. That is the trade for a
+zero-setup install: rotate `KDRIVE_DEVICE_KEY` on the server if an APK leaks.
 
 ## Getting an installable APK
 

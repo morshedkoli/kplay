@@ -257,4 +257,19 @@ class ScreenshotTest {
             .setCodecs(codec)
             .setSampleMimeType("audio/mp4a-latm")
             .build()
+
+    /** The launch lock, mid-entry and rejected — the state that has to read
+     * clearly from across a room. */
+    @Test
+    fun `pin screen`() {
+        rule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                PinScreen(purpose = PinPurpose.Unlock, error = "Wrong PIN.") {}
+            }
+        }
+        rule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/pin-screen.png",
+            roborazziOptions = RoborazziOptions(),
+        )
+    }
 }

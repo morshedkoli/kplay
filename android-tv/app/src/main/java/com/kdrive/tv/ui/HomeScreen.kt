@@ -60,6 +60,7 @@ fun HomeScreen(
     api: ApiClient,
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     var movies by remember { mutableStateOf<List<MediaItem>?>(null) }
     var series by remember { mutableStateOf<List<MediaItem>?>(null) }
@@ -124,6 +125,7 @@ fun HomeScreen(
             api = api,
             imageLoader = imageLoader,
             onSelect = onSelect,
+            onOpenSettings = onOpenSettings,
             syncing = syncing,
             syncStatus = syncStatus,
             onSync = { sync() },
@@ -145,6 +147,7 @@ internal fun BrowseContent(
     api: ApiClient,
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
+    onOpenSettings: () -> Unit = {},
     syncing: Boolean = false,
     syncStatus: String? = null,
     // Null in the screenshot tests, which render this with fixed data and
@@ -174,7 +177,12 @@ internal fun BrowseContent(
     Row(Modifier.fillMaxSize().background(K.Ink)) {
         NavRail(
             selected = section,
-            onSelect = { section = it },
+            // Settings navigates away instead of filtering, so it must not
+            // become the selected section — the rail would then sit lit on a
+            // screen the user has already left.
+            onSelect = { picked ->
+                if (picked == Section.Settings) onOpenSettings() else section = picked
+            },
             // Above the content so the expanded labels are not painted over,
             // while still occupying its own column in the layout.
             modifier = Modifier.zIndex(1f),

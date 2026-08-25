@@ -41,6 +41,12 @@ jobs:
 
       - name: Build debug APK
         working-directory: android-tv
+        # The server URL is committed; the device key is not. Add it as a
+        # repository secret named KDRIVE_DEVICE_KEY and CI produces an APK
+        # that opens straight into the library. Without the secret the build
+        # still succeeds and the app asks for both on first launch.
+        env:
+          KDRIVE_DEVICE_KEY: ${{ secrets.KDRIVE_DEVICE_KEY }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK

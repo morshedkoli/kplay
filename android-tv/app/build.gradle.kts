@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,15 +8,32 @@ plugins {
     id("io.github.takahirom.roborazzi")
 }
 
+// Values that must reach the APK without being committed live in
+// android-tv/local.properties, which is gitignored — the same file the
+// Android plugin already reads sdk.dir from.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
 /**
  * Reads a build-time value from a Gradle property (`-PsomeName=…` or
- * gradle.properties) falling back to an environment variable, then to "".
- * Trailing slashes are stripped so the client can concatenate paths safely.
+ * gradle.properties), then an environment variable, then local.properties,
+ * then the supplied default. Trailing slashes are stripped so the client can
+ * concatenate paths safely.
  */
-fun resolveConfig(gradleProperty: String, envVar: String): String =
-    (project.findProperty(gradleProperty) as String? ?: System.getenv(envVar) ?: "")
+fun resolveConfig(gradleProperty: String, envVar: String, default: String = ""): String =
+    (project.findProperty(gradleProperty) as String?
+        ?: System.getenv(envVar)
+        ?: localProperties.getProperty(gradleProperty)
+        ?: default)
         .trim()
         .trimEnd('/')
+
+/** The server this app is built for. Committed on purpose: a public URL is
+ * not a secret, and baking it in is what lets the app open straight into the
+ * library instead of asking a remote to type it. */
+val DEFAULT_SERVER_URL = "https://kplay-lemon.vercel.app"
 
 android {
     namespace = "com.kdrive.tv"
@@ -27,14 +46,19 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Baked-in server config, so an installed APK runs with no setup
-        // screen at all — a TV remote is a miserable way to type a URL and a
-        // random key.
+        // Baked-in server config, so an installed APK opens straight into
+        // the library with no setup screen at all — a TV remote is a
+        // miserable way to type a URL and a random key.
         //
-        // Values come from -P flags, gradle.properties, or the environment,
-        // in that order. Both default to empty, and when either is empty the
-        // app falls back to asking on first launch — that keeps a plain
-        // `gradlew assembleDebug` working for anyone without the values.
+        // The URL has a committed default (DEFAULT_SERVER_URL above), so it
+        // needs nothing from the builder. The device key is a secret and has
+        // no default: supply it with -PkdriveDeviceKey, KDRIVE_DEVICE_KEY in
+        // the environment, or a kdriveDeviceKey line in the gitignored
+        // android-tv/local.properties.
+        //
+        // Without the key the app falls back to asking on first launch, which
+        // keeps a plain `gradlew assembleDebug` from producing an APK that
+        // can reach nothing.
         //
         // NOTE: the device key ends up readable inside the APK. Anyone who
         // gets the file can extract it and reach the server. That is the
@@ -43,7 +67,7 @@ android {
         buildConfigField(
             "String",
             "SERVER_URL",
-            "\"${resolveConfig("kdriveServerUrl", "KDRIVE_SERVER_URL")}\"",
+            "\"${resolveConfig("kdriveServerUrl", "KDRIVE_SERVER_URL", DEFAULT_SERVER_URL)}\"",
         )
         buildConfigField(
             "String",
