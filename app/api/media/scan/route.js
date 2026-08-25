@@ -9,17 +9,12 @@
 
 import { requireDeviceOrSession } from '@/lib/auth.js';
 import { listFolderFiles } from '@/lib/gdrive.js';
+import { isVideoFile } from '@/lib/library/video-types.js';
 import { matchAndStore, rematchUnmatchedMovies } from '@/lib/library/match.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-// Anything Drive reports as a non-video type is skipped rather than imported
-// as an unmatched title — a stray PDF in the folder shouldn't become a movie.
-function isVideo(file) {
-  return file.mimeType?.startsWith('video/');
-}
 
 /** Every driveFileId already represented in the library, movies and episodes. */
 async function knownDriveFileIds() {
@@ -44,7 +39,7 @@ export async function POST(request) {
   }
 
   const known = await knownDriveFileIds();
-  const pending = files.filter((f) => isVideo(f) && !known.has(f.driveFileId));
+  const pending = files.filter((f) => isVideoFile(f) && !known.has(f.driveFileId));
 
   const imported = [];
   const failed = [];

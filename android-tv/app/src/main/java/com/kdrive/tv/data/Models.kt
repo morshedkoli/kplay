@@ -80,3 +80,44 @@ data class MediaListResponse(
     val movies: List<MediaItem> = emptyList(),
     val series: List<MediaItem> = emptyList(),
 )
+
+/**
+ * What POST /api/media/scan reports back.
+ *
+ * Only the counts are read here — the per-file detail the route returns is
+ * for the web client, which has room to list it.
+ */
+@Serializable
+data class ScanResult(
+    val scanned: Int = 0,
+    val skipped: Int = 0,
+    val imported: List<ScanEntry> = emptyList(),
+    val rematched: List<ScanEntry> = emptyList(),
+    val failed: List<ScanEntry> = emptyList(),
+) {
+    /** One line for the rail, in the same words the web sidebar uses. */
+    fun summary(): String {
+        val parts = buildList {
+            if (imported.isNotEmpty()) add("${imported.size} added")
+            if (rematched.isNotEmpty()) add("${rematched.size} matched")
+            if (failed.isNotEmpty()) add("${failed.size} failed")
+        }
+        if (parts.isEmpty()) return "Up to date — $scanned file${if (scanned == 1) "" else "s"}"
+        return parts.joinToString(" · ")
+    }
+
+    /** True when anything about the library actually changed, i.e. when the
+     * caller has a reason to re-fetch it. */
+    val changed: Boolean get() = imported.isNotEmpty() || rematched.isNotEmpty()
+}
+
+/** Entries differ in shape between the three lists; every field is optional
+ * so one class covers all of them without the parse ever failing. */
+@Serializable
+data class ScanEntry(
+    val filename: String? = null,
+    val title: String? = null,
+    val status: String? = null,
+    val type: String? = null,
+    val error: String? = null,
+)

@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,7 @@ import com.kdrive.tv.ui.components.CarouselRow
 import com.kdrive.tv.ui.components.NavRail
 import com.kdrive.tv.ui.components.Section
 import com.kdrive.tv.ui.theme.K
+import kotlinx.coroutines.launch
 
 /**
  * The browse screen: a rail on the left, and to its right a hero above
@@ -62,14 +64,48 @@ fun HomeScreen(
     var movies by remember { mutableStateOf<List<MediaItem>?>(null) }
     var series by remember { mutableStateOf<List<MediaItem>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var syncing by remember { mutableStateOf(false) }
+    var syncStatus by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
+    suspend fun load() {
         try {
             val library = api.listLibrary()
             movies = library.movies
             series = library.series
+            error = null
         } catch (e: Exception) {
             error = e.message ?: "Couldn't reach the server"
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    /**
+     * Imports whatever is new in the Drive folder, then reloads the library.
+     *
+     * Before this the TV could only ever show what the web app had already
+     * imported — dropping a file into Drive meant walking to a browser. The
+     * scan is metadata-only, so the same request that serves the web sidebar
+     * serves the remote.
+     *
+     * Reload only on a scan that changed something: a no-op sync should not
+     * make the rows flicker and reset where focus was.
+     */
+    fun sync() {
+        if (syncing) return
+        syncing = true
+        syncStatus = null
+        scope.launch {
+            try {
+                val result = api.scanLibrary()
+                syncStatus = result.summary()
+                if (result.changed || (movies.isNullOrEmpty() && series.isNullOrEmpty())) load()
+            } catch (e: Exception) {
+                syncStatus = e.message ?: "Sync failed"
+            } finally {
+                syncing = false
+            }
         }
     }
 
@@ -88,6 +124,9 @@ fun HomeScreen(
             api = api,
             imageLoader = imageLoader,
             onSelect = onSelect,
+            syncing = syncing,
+            syncStatus = syncStatus,
+            onSync = { sync() },
         )
     }
 }
@@ -106,6 +145,11 @@ internal fun BrowseContent(
     api: ApiClient,
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
+    syncing: Boolean = false,
+    syncStatus: String? = null,
+    // Null in the screenshot tests, which render this with fixed data and
+    // have no server to sync against.
+    onSync: (() -> Unit)? = null,
 ) {
     var section by remember { mutableStateOf(Section.Home) }
     var spotlight by remember {
@@ -134,13 +178,16 @@ internal fun BrowseContent(
             // Above the content so the expanded labels are not painted over,
             // while still occupying its own column in the layout.
             modifier = Modifier.zIndex(1f),
+            syncing = syncing,
+            syncStatus = syncStatus,
+            onSync = onSync,
         )
 
         Box(Modifier.fillMaxSize()) {
             if (movies.isEmpty() && series.isEmpty()) {
                 Message(
                     "Nothing here yet",
-                    "Drop video files into your Drive folder, then run a scan from the web app.",
+                    "Drop video files into your Drive folder, then press Sync in the menu on the left.",
                 )
             } else {
                 Hero(item = spotlight, api = api, imageLoader = imageLoader)

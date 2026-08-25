@@ -98,6 +98,7 @@ class ScreenshotTest {
                         duration = downTo(48, 30),
                         isPlaying = true,
                         seekTargetMs = downTo(16, 50),
+                        hasAudioChoice = true,
                     )
                 }
             }
@@ -133,6 +134,8 @@ class ScreenshotTest {
                     api = api,
                     imageLoader = loader,
                     onSelect = {},
+                    // Non-null so the rail draws its Sync row.
+                    onSync = {},
                 )
             }
         }
@@ -208,4 +211,50 @@ class ScreenshotTest {
             roborazziOptions = RoborazziOptions(),
         )
     }
+
+    /**
+     * The audio picker over a paused frame.
+     *
+     * Built from a real Tracks object rather than hand-written rows, so this
+     * also checks the labelling: a language tag has to come out as a language
+     * name, and an unsupported track has to stay listed and say so.
+     */
+    @Test
+    fun `audio menu`() {
+        val group = androidx.media3.common.Tracks.Group(
+            androidx.media3.common.TrackGroup(
+                format("en", 6, "ac-3"),
+                format("hi", 2, "aac"),
+                format("ja", 8, "dts"),
+            ),
+            false,
+            intArrayOf(
+                androidx.media3.common.C.FORMAT_HANDLED,
+                androidx.media3.common.C.FORMAT_HANDLED,
+                androidx.media3.common.C.FORMAT_UNSUPPORTED_SUBTYPE,
+            ),
+            booleanArrayOf(true, false, false),
+        )
+        val options = audioOptions(androidx.media3.common.Tracks(listOf(group)))
+
+        rule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Box(Modifier.fillMaxSize().background(K.Ink)) {
+                    AudioMenu(options = options, cursor = 1)
+                }
+            }
+        }
+        rule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/audio-menu.png",
+            roborazziOptions = RoborazziOptions(),
+        )
+    }
+
+    private fun format(language: String, channels: Int, codec: String) =
+        androidx.media3.common.Format.Builder()
+            .setLanguage(language)
+            .setChannelCount(channels)
+            .setCodecs(codec)
+            .setSampleMimeType("audio/mp4a-latm")
+            .build()
 }

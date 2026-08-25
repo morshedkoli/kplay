@@ -1,7 +1,11 @@
 package com.kdrive.tv.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -34,9 +39,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kdrive.tv.ui.theme.K
 
@@ -62,6 +69,9 @@ fun NavRail(
     selected: Section,
     onSelect: (Section) -> Unit,
     modifier: Modifier = Modifier,
+    syncing: Boolean = false,
+    syncStatus: String? = null,
+    onSync: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val width by animateDpAsState(
@@ -96,6 +106,19 @@ fun NavRail(
                 selected = section == selected,
                 expanded = expanded,
                 onClick = { onSelect(section) },
+            )
+        }
+
+        if (onSync != null) {
+            // Pushed to the far end, away from the sections, because it acts
+            // on the library rather than navigating it.
+            Spacer(Modifier.weight(1f))
+            RailAction(
+                label = "Sync",
+                busy = syncing,
+                status = syncStatus,
+                expanded = expanded,
+                onClick = onSync,
             )
         }
     }
@@ -167,5 +190,84 @@ private fun RailItem(
             modifier = Modifier.size(24.dp),
         )
         if (expanded) Text(section.label, style = K.Body, color = tint)
+    }
+}
+
+/**
+ * The Sync row.
+ *
+ * An action, not a destination, so it sits below the sections separated by
+ * space rather than among them — the same shape the web sidebar settled on.
+ * Its status line only renders while the rail is expanded, which is exactly
+ * when someone is looking at it.
+ */
+@Composable
+private fun RailAction(
+    label: String,
+    busy: Boolean,
+    status: String?,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+
+    val tint by animateColorAsState(
+        targetValue = if (focused) K.TextPrimary else K.TextFaint,
+        animationSpec = tween(140),
+        label = "railActionTint",
+    )
+
+    // One continuous turn while a scan is in flight. A scan takes as long as
+    // it takes, with no percentage to report, so motion is the only honest
+    // signal that it is still working.
+    val spin = rememberInfiniteTransition(label = "syncSpin")
+    val angle by spin.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing)),
+        label = "syncAngle",
+    )
+
+    Column(Modifier.padding(horizontal = 12.dp)) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (focused) K.SurfaceHi else Color.Transparent)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    // Pressing it twice mid-scan would run two imports over
+                    // the same folder and race each other to create the same
+                    // rows, so the second press does nothing.
+                    enabled = !busy,
+                    onClick = onClick,
+                )
+                .padding(horizontal = 8.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Refresh,
+                contentDescription = label,
+                tint = if (busy) K.Accent else tint,
+                modifier = Modifier
+                    .size(24.dp)
+                    .rotate(if (busy) angle else 0f),
+            )
+            if (expanded) {
+                Text(if (busy) "Syncing…" else label, style = K.Body, color = tint)
+            }
+        }
+        if (expanded && !status.isNullOrBlank()) {
+            Text(
+                status,
+                style = K.Eyebrow,
+                color = K.TextFaint,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
+            )
+        }
     }
 }

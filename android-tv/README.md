@@ -14,7 +14,17 @@ everything in your KDrive library — movies and series alike.
   season-by-season episode list (series).
 - **Player** — Media3 `ExoPlayer` streaming from `/api/media/stream/[id]`, the same Range-capable
   endpoint the web player uses. The route accepts a media `_id` or an episode `_id`, so one player
-  screen covers both.
+  screen covers both. Playback is configured in `data/Playback.kt`: a 2 GB on-disk read-through
+  cache, deep buffers with a 30-second back-buffer, decoder fallback, and extractor workarounds for
+  the containers people actually own. A failure now shows what went wrong and offers a retry
+  instead of spinning forever.
+- **Audio tracks** — press **Menu** (or **Info**) during playback on a file with more than one
+  soundtrack to pick a language. Tracks are labelled by name, then by language, with channel count
+  and codec underneath; a track this device can't decode is listed and marked, not hidden.
+- **Sync** — the bottom entry in the nav rail runs `POST /api/media/scan`, importing anything new in
+  the Drive folder and re-matching whatever missed TMDb earlier, then reloads the library. Same
+  request the web sidebar's Sync button fires, so a file dropped into Drive reaches the TV without
+  going anywhere near a browser.
 - **Continue-watching sync** — position is fetched and saved through `/api/media/progress`, keyed
   by whatever is playing (media `_id` for a movie, episode `_id` for an episode). That's the same
   key the web player posts under, so a part-watched episode resumes at the same spot on either
@@ -23,8 +33,8 @@ everything in your KDrive library — movies and series alike.
 Auth is the same `x-kdrive-device-key` header the server accepts for non-browser clients
 (`lib/auth.js`) — no separate auth mechanism.
 
-Adding media is not part of this app. Files go into the Drive folder directly and are imported by
-`POST /api/media/scan` from the web app's **Add media** page.
+Uploading media is not part of this app. Files go into the Drive folder directly; **Sync** in the
+nav rail imports them.
 
 ## Getting an installable APK
 

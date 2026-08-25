@@ -1,21 +1,23 @@
 package com.kdrive.tv.ui
 
+import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -23,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -42,16 +46,23 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import com.kdrive.tv.data.ApiClient
+import com.kdrive.tv.data.loadControl
+import com.kdrive.tv.data.mediaSourceFactory
+import com.kdrive.tv.data.renderersFactory
 import com.kdrive.tv.ui.theme.K
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import java.util.Locale
 
 private const val PROGRESS_POST_INTERVAL_SECONDS = 10L
 
@@ -73,15 +84,129 @@ private const val CONTROLS_TIMEOUT_MS = 4_000L
 private const val SEEK_COMMIT_DELAY_MS = 450L
 
 /**
+ * One selectable audio rendition, flattened out of the nested Tracks model
+ * into something a menu can render directly.
+ *
+ * `group` and `indexInGroup` are what the override is built from; everything
+ * else exists only to label the row.
+ */
+internal data class AudioOption(
+    val group: Tracks.Group,
+    val indexInGroup: Int,
+    val label: String,
+    val detail: String?,
+    val selected: Boolean,
+    val supported: Boolean,
+)
+
+/**
+ * Reads the audio renditions out of the current track list.
+ *
+ * A file with one audio track produces one entry, and the caller uses that to
+ * hide the menu entirely — offering a "choose language" list of length one is
+ * just a dead end for the remote to wander into.
+ */
+internal fun audioOptions(tracks: Tracks): List<AudioOption> =
+    tracks.groups
+        .filter { it.type == C.TRACK_TYPE_AUDIO }
+        .flatMap { group ->
+            (0 until group.length).map { i ->
+                val format = group.getTrackFormat(i)
+                AudioOption(
+                    group = group,
+                    indexInGroup = i,
+                    label = audioLabel(format.label, format.language, i),
+                    detail = audioDetail(format.channelCount, format.codecs),
+                    selected = group.isTrackSelected(i),
+                    supported = group.isTrackSupported(i),
+                )
+            }
+        }
+
+/**
+ * What to call a rendition.
+ *
+ * The container's own label wins when it has one — a release that bothered to
+ * name a track "Director commentary" is more use than "English". Otherwise the
+ * language tag is expanded to a real language name, because "hin" means
+ * nothing on a television screen.
+ */
+private fun audioLabel(label: String?, language: String?, index: Int): String {
+    if (!label.isNullOrBlank()) return label
+    val tag = language?.takeIf { it.isNotBlank() && it != C.LANGUAGE_UNDETERMINED }
+    if (tag != null) {
+        val name = Locale.forLanguageTag(tag).displayLanguage
+        if (name.isNotBlank() && !name.equals(tag, ignoreCase = true)) return name
+        return tag.uppercase(Locale.ROOT)
+    }
+    return "Audio ${index + 1}"
+}
+
+/** Channel layout and codec, when known — what distinguishes two tracks that
+ * are both called "English". */
+private fun audioDetail(channelCount: Int, codecs: String?): String? {
+    val parts = mutableListOf<String>()
+    when {
+        channelCount == 1 -> parts += "Mono"
+        channelCount == 2 -> parts += "Stereo"
+        channelCount > 2 -> parts += "${channelCount}ch"
+    }
+    codecs?.substringBefore('.')?.takeIf { it.isNotBlank() }?.let { parts += it }
+    return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
+}
+
+/**
+ * Turns a playback failure into something worth putting on a television.
+ *
+ * The distinction that matters to the viewer is whether the file can never
+ * play here (no decoder for it) or merely did not play just now (network),
+ * because only one of those is worth pressing retry on.
+ */
+private fun describe(error: PlaybackException): String = when (error.errorCode) {
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+    ->
+        "Lost the connection to your server."
+
+    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
+        "The server refused the stream. It may still be reading this file from Drive."
+
+    PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ->
+        "The server sent this file with a type the player will not accept."
+
+    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+    PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+    ->
+        "This container is not one this player can read."
+
+    PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+    PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+    ->
+        "This file looks damaged or incomplete."
+
+    PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ->
+        "This video is beyond what this device can decode — too high a resolution or profile."
+
+    PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+    PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_FAILED,
+    ->
+        "This device has no working decoder for this video or audio format."
+
+    else -> error.errorCodeName
+}
+
+/**
  * Full-screen playback with a remote-driven transport.
  *
- * Media3's stock controller is built for a touchscreen and is awkward under a
- * D-pad, so the overlay here is ours and every key is handled explicitly:
+ * The stock Media3 controller is built for a touchscreen and is awkward under
+ * a D-pad, so the overlay here is ours and every key is handled explicitly:
  *
  *   Centre / Enter / Play-Pause  toggle playback
  *   Left / Right                 wind ∓10s, accumulating
  *   Rewind / Fast-forward        wind ∓30s, accumulating
  *   Up                           show the controls
+ *   Menu / Info                  audio track list, when the file has more than one
  *   Down / Back                  hide the controls, then leave
  *
  * Seeking accumulates the way it does on a phone: presses move a target that
@@ -93,6 +218,7 @@ private const val SEEK_COMMIT_DELAY_MS = 450L
  * for an episode. Position is saved under that same id, so the web player
  * resumes where the TV left off and vice versa.
  */
+@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
     mediaId: String,
@@ -102,22 +228,18 @@ fun PlayerScreen(
 ) {
     val context = LocalContext.current
 
+    // Built from the shared playback configuration: cached HTTP, deep
+    // buffers, decoder fallback. data/Playback.kt has the reasoning for why
+    // none of those are left at their defaults.
     val player = remember {
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(api.authHeaders())
-            // A dropped connection mid-film should rebuffer, not end playback.
-            // That matters on a host that caps request duration: the transfer
-            // is killed server-side and ExoPlayer has to reconnect from the
-            // last position it read.
-            .setAllowCrossProtocolRedirects(true)
-
-        val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-            .createMediaSource(MediaItem.fromUri(api.streamUrl(mediaId)))
-
-        ExoPlayer.Builder(context).build().apply {
-            setMediaSource(mediaSource)
-            prepare()
-        }
+        ExoPlayer.Builder(context, renderersFactory(context))
+            .setMediaSourceFactory(mediaSourceFactory(context, api))
+            .setLoadControl(loadControl())
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(api.streamUrl(mediaId)))
+                prepare()
+            }
     }
 
     var controlsVisible by remember { mutableStateOf(true) }
@@ -135,6 +257,13 @@ fun PlayerScreen(
     // Bumped on every keypress; the auto-hide timer restarts whenever it
     // changes, which is simpler than cancelling and re-launching a job.
     var lastInteraction by remember { mutableLongStateOf(0L) }
+    // Non-null once playback has failed. Until this existed a failure showed
+    // as a spinner that never stopped, which is what "some videos do not
+    // play" looked like from the sofa: no message, no retry, no clue.
+    var failure by remember { mutableStateOf<String?>(null) }
+    var audio by remember { mutableStateOf<List<AudioOption>>(emptyList()) }
+    var audioMenuVisible by remember { mutableStateOf(false) }
+    var audioCursor by remember { mutableIntStateOf(0) }
 
     val focusRequester = remember { FocusRequester() }
 
@@ -152,6 +281,18 @@ fun PlayerScreen(
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_ENDED) controlsVisible = true
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                audio = audioOptions(tracks)
+                val selected = audio.indexOfFirst { it.selected }
+                if (selected >= 0) audioCursor = selected
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                failure = describe(error)
+                buffering = false
+                controlsVisible = true
             }
         }
         player.addListener(listener)
@@ -203,10 +344,11 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(lastInteraction, isPlaying) {
-        // Controls stay up while paused — a paused screen with no controls
-        // gives the user nothing to act on.
-        if (!isPlaying) return@LaunchedEffect
+    LaunchedEffect(lastInteraction, isPlaying, audioMenuVisible, failure) {
+        // Controls stay up while paused, while the audio menu is open, and
+        // after a failure — in all three the screen is showing something the
+        // user still has to act on.
+        if (!isPlaying || audioMenuVisible || failure != null) return@LaunchedEffect
         delay(CONTROLS_TIMEOUT_MS)
         controlsVisible = false
     }
@@ -241,6 +383,33 @@ fun PlayerScreen(
         touch()
     }
 
+    /** Re-preparing keeps the current position, so a retry after a network
+     * drop resumes where the picture stopped rather than at the start. */
+    fun retry() {
+        failure = null
+        buffering = true
+        player.prepare()
+        player.play()
+    }
+
+    /**
+     * Pins playback to one audio rendition.
+     *
+     * An override rather than a preferred-language parameter: the user picked
+     * this exact track, and a preference would let the selector quietly choose
+     * a different one whenever the track list is rebuilt.
+     */
+    fun chooseAudio(option: AudioOption) {
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setOverrideForType(
+                TrackSelectionOverride(option.group.mediaTrackGroup, option.indexInGroup),
+            )
+            .build()
+        audioMenuVisible = false
+        touch()
+    }
+
     /** Leaving saves position first — otherwise up to ten seconds of watching
      * is lost every time someone backs out. */
     fun leave() {
@@ -256,6 +425,55 @@ fun PlayerScreen(
             .focusable()
             .onKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+
+                // The menu owns every key while it is open, so the transport
+                // underneath cannot seek out from under the list being read.
+                if (audioMenuVisible) {
+                    return@onKeyEvent when (event.key) {
+                        Key.DirectionUp -> {
+                            audioCursor = (audioCursor - 1).coerceAtLeast(0)
+                            true
+                        }
+
+                        Key.DirectionDown -> {
+                            audioCursor = (audioCursor + 1).coerceAtMost(audio.lastIndex)
+                            true
+                        }
+
+                        Key.DirectionCenter, Key.Enter -> {
+                            audio.getOrNull(audioCursor)?.let(::chooseAudio)
+                            true
+                        }
+
+                        Key.Back, Key.Escape, Key.Menu, Key.DirectionLeft -> {
+                            audioMenuVisible = false
+                            true
+                        }
+
+                        // Swallowed rather than passed through: a stray key
+                        // must not seek the film behind the open menu.
+                        else -> true
+                    }
+                }
+
+                // Likewise after a failure. There is nothing to seek in, and
+                // the only two useful answers are try again and leave.
+                if (failure != null) {
+                    return@onKeyEvent when (event.key) {
+                        Key.DirectionCenter, Key.Enter, Key.MediaPlay, Key.MediaPlayPause -> {
+                            retry()
+                            true
+                        }
+
+                        Key.Back, Key.Escape -> {
+                            leave()
+                            true
+                        }
+
+                        else -> true
+                    }
+                }
+
                 when (event.key) {
                     Key.DirectionCenter, Key.Enter, Key.Spacebar,
                     Key.MediaPlayPause -> { togglePlay(); true }
@@ -268,6 +486,19 @@ fun PlayerScreen(
 
                     Key.MediaRewind -> { seekBy(-SEEK_JUMP_MS); true }
                     Key.MediaFastForward -> { seekBy(SEEK_JUMP_MS); true }
+
+                    // Remotes disagree about which of these they carry, so all
+                    // three open the audio list. A file with one soundtrack
+                    // has nothing to show, and the key falls through instead.
+                    Key.Menu, Key.Info, Key.M -> {
+                        if (audio.size > 1) {
+                            audioMenuVisible = true
+                            touch()
+                            true
+                        } else {
+                            false
+                        }
+                    }
 
                     Key.DirectionUp -> { touch(); true }
 
@@ -303,13 +534,13 @@ fun PlayerScreen(
             },
         )
 
-        if (buffering) {
+        if (buffering && failure == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = K.Accent)
             }
         }
 
-        if (showActionGlyph && !buffering) {
+        if (showActionGlyph && !buffering && failure == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Box(
                     Modifier
@@ -327,8 +558,12 @@ fun PlayerScreen(
             }
         }
 
+        failure?.let { message -> PlaybackFailure(title = title, message = message) }
+
+        if (audioMenuVisible) AudioMenu(options = audio, cursor = audioCursor)
+
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible && failure == null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomStart),
@@ -340,7 +575,105 @@ fun PlayerScreen(
                 duration = duration,
                 isPlaying = isPlaying,
                 seekTargetMs = seekTargetMs,
+                hasAudioChoice = audio.size > 1,
             )
+        }
+    }
+}
+
+/** Replaces the picture entirely — a half-visible frozen frame behind an
+ * error reads as a glitch, while a plain panel reads as a decision. */
+@Composable
+private fun PlaybackFailure(title: String?, message: String) {
+    Box(
+        Modifier.fillMaxSize().background(K.Ink.copy(alpha = 0.94f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 120.dp),
+        ) {
+            if (!title.isNullOrBlank()) {
+                Text(title, style = K.Eyebrow, color = K.TextFaint)
+            }
+            Text("Can't play this", style = K.PageTitle, color = K.TextPrimary)
+            Text(message, style = K.Body, color = K.TextMuted)
+            Text("OK  TRY AGAIN      BACK  LEAVE", style = K.Eyebrow, color = K.TextFaint)
+        }
+    }
+}
+
+/**
+ * Audio track list.
+ *
+ * A right-hand panel rather than a centred dialog: the user is looking at a
+ * picture and choosing a soundtrack for it, so covering as little of the frame
+ * as possible is the point.
+ *
+ * The rows are drawn, not focusable. Focus stays on the player box that owns
+ * the key handler — real focusable rows would take the D-pad away from it and
+ * break seeking the moment the menu closed.
+ */
+@Composable
+internal fun AudioMenu(options: List<AudioOption>, cursor: Int) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
+        Column(
+            Modifier
+                .padding(end = K.Gutter)
+                .width(380.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(K.Ink.copy(alpha = 0.95f))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("Audio", style = K.Section, color = K.TextPrimary)
+            Text(
+                "▲ ▼  choose      OK  select      BACK  close",
+                style = K.Eyebrow,
+                color = K.TextFaint,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            options.forEachIndexed { index, option ->
+                val highlighted = index == cursor
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (highlighted) K.SurfaceHi else Color.Transparent)
+                        .border(
+                            width = if (highlighted) 2.dp else 0.dp,
+                            color = if (highlighted) K.Accent else Color.Transparent,
+                            shape = RoundedCornerShape(6.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            option.label,
+                            style = K.Body,
+                            // A track this device cannot decode is still
+                            // listed, greyed. Hiding it would leave the user
+                            // hunting for a language the file demonstrably
+                            // has.
+                            color = if (option.supported) K.TextPrimary else K.TextFaint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val detail = if (option.supported) {
+                            option.detail
+                        } else {
+                            listOfNotNull(option.detail, "not supported").joinToString(" · ")
+                        }
+                        if (!detail.isNullOrBlank()) {
+                            Text(detail, style = K.Eyebrow, color = K.TextFaint)
+                        }
+                    }
+                    if (option.selected) Text("●", style = K.Body, color = K.Accent)
+                }
+            }
         }
     }
 }
@@ -353,6 +686,7 @@ internal fun Controls(
     duration: Long,
     isPlaying: Boolean,
     seekTargetMs: Long?,
+    hasAudioChoice: Boolean = false,
 ) {
     // While scrubbing the bar and the clock show where you are winding to,
     // not where playback still is — otherwise the numbers argue with the
@@ -379,14 +713,22 @@ internal fun Controls(
             )
         }
 
-        Scrubber(position = shown, buffered = buffered, duration = duration, scrubbing = seekTargetMs != null)
+        Scrubber(
+            position = shown,
+            buffered = buffered,
+            duration = duration,
+            scrubbing = seekTargetMs != null,
+        )
 
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
                     "${formatTime(shown)}  /  ${formatTime(duration)}",
                     style = K.Body,
@@ -403,10 +745,14 @@ internal fun Controls(
             }
             // A legend rather than buttons: the remote already has these keys,
             // and focusable on-screen buttons would steal the arrow keys that
-            // seeking needs.
+            // seeking needs. The audio entry appears only when the file
+            // actually carries a second soundtrack.
             Text(
-                if (isPlaying) "OK  PAUSE      ◀ ▶  10s      ◀◀ ▶▶  30s"
-                else "OK  PLAY      ◀ ▶  10s      ◀◀ ▶▶  30s",
+                buildString {
+                    append(if (isPlaying) "OK  PAUSE" else "OK  PLAY")
+                    append("      ◀ ▶  10s      ◀◀ ▶▶  30s")
+                    if (hasAudioChoice) append("      MENU  AUDIO")
+                },
                 style = K.Eyebrow,
                 color = K.TextFaint,
             )

@@ -22,6 +22,7 @@ import { ObjectId } from 'mongodb';
 
 import { requireDeviceOrSession } from '@/lib/auth.js';
 import { getFileMetadata, streamFile } from '@/lib/gdrive.js';
+import { videoContentType } from '@/lib/library/video-types.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 
 export const runtime = 'nodejs';
@@ -37,6 +38,11 @@ export const dynamic = 'force-dynamic';
 // open-ended range to run to the end of the file; a truncated range may end
 // its playback early. Browsers are unaffected either way.
 const MAX_CHUNK_BYTES = Number(process.env.STREAM_MAX_CHUNK_BYTES || 0);
+
+// How long a client may reuse a range it already downloaded. A day is long
+// enough to make a re-watch or a scrub free and short enough that a replaced
+// file is not served stale forever.
+const CACHE_SECONDS = 86400;
 
 async function resolveDriveFileId(id) {
   const _id = new ObjectId(id);
@@ -96,6 +102,31 @@ export async function GET(request, { params }) {
     return Response.json({ error: 'Storage read failed' }, { status: 502 });
   }
 
+  // Drive does not always report a size — a shortcut, or a file still being
+  // written, comes back without one. `meta.size` was then 0, every range
+  // resolved as unsatisfiable, and the route answered 416 forever: the title
+  // sat in the library and simply never played. Serve it whole instead and
+  // let the player work the length out from the container.
+  if (!meta.size) {
+    console.warn(`[api/media/stream] Drive reported no size for ${driveFileId}; serving whole`);
+    let whole;
+    try {
+      whole = await streamFile(driveFileId, null);
+    } catch (err) {
+      console.error('[api/media/stream] Drive stream failed', err);
+      return Response.json({ error: 'Storage read failed' }, { status: 502 });
+    }
+    request.signal?.addEventListener('abort', () => whole.stream.destroy(), { once: true });
+    return new Response(Readable.toWeb(whole.stream), {
+      status: 200,
+      headers: {
+        'Accept-Ranges': 'none',
+        'Content-Type': videoContentType(meta.name, meta.mimeType),
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  }
+
   const rangeHeader = request.headers.get('range');
   const range = resolveRange(rangeHeader, meta.size);
   if (!range) {
@@ -135,8 +166,22 @@ export async function GET(request, { params }) {
   const headers = {
     'Content-Length': String(range.end - range.start + 1),
     'Accept-Ranges': 'bytes',
-    'Content-Type': meta.mimeType || 'application/octet-stream',
-    'Cache-Control': 'private, no-store',
+    // Not Drive's mimeType. Drive reports plenty of these files as
+    // application/octet-stream, and a browser <video> refuses to play that —
+    // see lib/library/video-types.js.
+    'Content-Type': videoContentType(meta.name, meta.mimeType),
+    // A file's bytes never change once it is in Drive, so re-fetching a range
+    // the client already holds is pure waste. `private` keeps it out of any
+    // shared proxy (these responses are behind a device key or a session
+    // cookie); `immutable` stops a revalidation round trip on every seek back
+    // into already-watched footage. This was `no-store`, which forced every
+    // single range request to travel all the way to Drive — the main reason
+    // scrubbing rebuffered even over a fast connection.
+    'Cache-Control': `private, max-age=${CACHE_SECONDS}, immutable`,
+    // Lets a client that kept a range revalidate it cheaply rather than
+    // re-downloading. Size plus id is enough: neither changes for a given
+    // file, and both change together when the file is replaced.
+    ETag: `"${driveFileId}-${meta.size}"`,
   };
   if (isPartial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${meta.size}`;
 

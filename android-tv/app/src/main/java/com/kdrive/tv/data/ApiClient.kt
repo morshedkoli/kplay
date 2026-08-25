@@ -32,6 +32,14 @@ class ApiClient(private val credentials: Credentials) {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // A scan is minutes of sequential TMDb lookups, not a request. Its own
+    // client so raising the ceiling for it does not make every other call
+    // hang for ten minutes when the server is simply unreachable.
+    private val scanHttp = http.newBuilder()
+        .readTimeout(10, TimeUnit.MINUTES)
+        .callTimeout(10, TimeUnit.MINUTES)
+        .build()
+
     private fun request(path: String) = Request.Builder()
         .url("${credentials.serverUrl}$path")
         .header(DEVICE_KEY_HEADER, credentials.deviceKey)
@@ -45,6 +53,37 @@ class ApiClient(private val credentials: Credentials) {
                     throw ApiError("Request to $path failed (HTTP ${res.code})", res.code)
                 }
                 body
+            }
+        } catch (e: IOException) {
+            throw ApiError("Network error reaching ${credentials.serverUrl}: ${e.message}")
+        }
+    }
+
+    /**
+     * Imports whatever is new in the Drive folder, and re-runs TMDb matching
+     * over anything that missed on an earlier pass — the same POST the web
+     * sidebar's Sync button fires.
+     *
+     * It runs on its own OkHttp client because the shared one reads with a
+     * 30-second timeout, and a scan is sequential by design: one TMDb lookup
+     * per new file, because the API rate-limits and because two episodes of
+     * the same show would otherwise race to create the parent. A folder with
+     * a few dozen new files takes minutes, and timing that out would leave a
+     * half-finished import with no report.
+     */
+    suspend fun scanLibrary(): ScanResult = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("${credentials.serverUrl}/api/media/scan")
+            .header(DEVICE_KEY_HEADER, credentials.deviceKey)
+            .post(ByteArray(0).toRequestBody(null, 0, 0))
+            .build()
+        try {
+            scanHttp.newCall(req).execute().use { res ->
+                val body = res.body?.string().orEmpty()
+                if (!res.isSuccessful) {
+                    throw ApiError("Sync failed (HTTP ${res.code})", res.code)
+                }
+                json.decodeFromString(ScanResult.serializer(), body)
             }
         } catch (e: IOException) {
             throw ApiError("Network error reaching ${credentials.serverUrl}: ${e.message}")
