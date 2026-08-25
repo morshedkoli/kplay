@@ -6,6 +6,17 @@ import SyncButton from './SyncButton.js';
 
 const LINKS = [
   {
+    href: '/',
+    label: 'Home',
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 10.5 12 3l9 7.5M5.25 9.75V20a1 1 0 0 0 1 1h11.5a1 1 0 0 0 1-1V9.75"
+      />
+    ),
+  },
+  {
     href: '/movies',
     label: 'Movies',
     icon: (
@@ -63,7 +74,12 @@ export default function Sidebar() {
 
       <nav className="flex flex-1 flex-col gap-1 px-2">
         {LINKS.map((link) => {
-          const active = pathname === link.href || pathname.startsWith(`${link.href}/`);
+          // '/' would otherwise match everything, since every path starts
+          // with it — Home is active only on exactly '/'.
+          const active =
+            link.href === '/'
+              ? pathname === '/'
+              : pathname === link.href || pathname.startsWith(`${link.href}/`);
           return (
             <Link
               key={link.href}
