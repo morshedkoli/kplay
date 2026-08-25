@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 9 and later refuse cleartext HTTP unless an app opts back in, which
+    this one has to do for two separate reasons:
+
+      * a kPlay server on the local network is reached at http://<lan-ip>:3000,
+        with no certificate to serve; and
+      * a DhakaFlix title is answered by /api/media/stream/[id] with a 302 to
+        the ISP index at http://172.16.50.x, so the player follows a plain-HTTP
+        redirect even when the server itself is HTTPS.
+
+    Without this the app failed with "Cleartext communication ... not permitted
+    by network security policy" before it could load the library at all.
+
+    Cleartext is permitted app-wide rather than per-host: the LAN address
+    changes with whatever machine is serving, and a <domain> entry cannot
+    express an address range. HTTPS is still used whenever the configured
+    server URL is https:// — this only removes the refusal, it does not
+    downgrade anything.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
