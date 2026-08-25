@@ -32,9 +32,6 @@ export default function MediaDetail({ id }) {
   // episode _id for a series. null means nothing is playing yet.
   const [playingId, setPlayingId] = useState(null);
   const [resumeSeconds, setResumeSeconds] = useState(0);
-  // Read after mount, not during render: the server has no window, and
-  // deciding this while rendering would hydrate to a different tree.
-  const [pageIsHttps, setPageIsHttps] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const videoRef = useRef(null);
@@ -44,10 +41,6 @@ export default function MediaDetail({ id }) {
   // Back link follows the item's own type, so a /movies/[id] URL that turns
   // out to hold a series still returns you to the section it belongs to.
   const listHref = isSeries ? '/series' : '/movies';
-
-  useEffect(() => {
-    setPageIsHttps(window.location.protocol === 'https:');
-  }, []);
 
   useEffect(() => {
     fetch(`/api/media/${id}`)
@@ -62,10 +55,6 @@ export default function MediaDetail({ id }) {
   // Progress follows whatever is playing. Before anything is picked, show the
   // movie's own saved position; a series parent has no position of its own.
   const progressId = playingId ?? (item && !isSeries ? id : null);
-
-  useEffect(() => {
-    setPageIsHttps(window.location.protocol === 'https:');
-  }, []);
 
   useEffect(() => {
     if (!progressId) return undefined;
@@ -153,11 +142,6 @@ export default function MediaDetail({ id }) {
     ? item.episodes?.find((ep) => String(ep._id) === String(playingId))
     : null;
 
-  // A DhakaFlix title plays straight from the ISP index over plain HTTP, so a
-  // browser on an HTTPS page blocks it as mixed content while the TV app plays
-  // it fine. Say so on the page rather than letting the player fail silently.
-  const fromDhakaFlix = item.source === 'dhakaflix' || item.episodes?.some((ep) => ep.source === 'dhakaflix');
-
   let subtitle;
   if (isSeries) {
     const unmatched = item.status === 'unmatched' ? ' · not matched on TMDb' : '';
@@ -213,13 +197,6 @@ export default function MediaDetail({ id }) {
       </div>
 
       <div className="mx-auto max-w-3xl p-6 sm:p-10">
-        {fromDhakaFlix && pageIsHttps ? (
-          <p className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            This title streams from the DhakaFlix server over plain HTTP, which this
-            browser blocks on an HTTPS page. Play it on the TV app, or open kPlay over
-            HTTP on the ISP network.
-          </p>
-        ) : null}
         {playingId ? (
           <>
             {playingEpisode ? (

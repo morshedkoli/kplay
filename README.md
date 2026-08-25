@@ -54,16 +54,14 @@ kdrive/                       ← the Next.js 15 app itself (full stack)
 │       └── session/          ← web sign-in / sign-out
 ├── lib/
 │   ├── gdrive.js              ← Google Drive API v3 wrapper (upload/stream/
-│   │                             metadata/delete) — the storage you own
-│   ├── dhakaflix.js           ← crawler for the ISP's h5ai index at
-│   │                             172.16.50.x — catalog only, never bytes
+│   │                             metadata/delete) — the only storage backend
 │   ├── library/               ← parse.js, tmdb.js, match.js — filename
 │   │                             parsing + TMDb auto-matching
 │   ├── models/media.js        ← media/episode Mongo schema helpers
 │   └── db.js  auth.js  session-cookie.js  admin-auth.js  env.js
 │                                format.js
 ├── scripts/                  ← smoke tests: test-gdrive, test-tmdb, test-db,
-│                                test-dhakaflix, show-indexes
+│                                show-indexes
 ├── middleware.js             ← page-level auth gate
 ├── PRD.md                    ← full product requirements doc, read this first
 ├── docs/01-architecture.md   ← system diagram + data flow
@@ -80,21 +78,11 @@ kdrive/                       ← the Next.js 15 app itself (full stack)
      `GOOGLE_DRIVE_FOLDER_ID` — the single Drive account's OAuth credentials
    - `TMDB_API_KEY` — for metadata auto-matching
    - `ADMIN_PASSWORD` — the app's single-user login
-   - DhakaFlix (the ISP index at `172.16.50.x`) needs no credentials and is on
-     by default. `DHAKAFLIX_ENABLED=0` turns it off — set that on any deploy
-     that cannot route to the ISP network. `DHAKAFLIX_ROOTS` (comma-separated
-     directory URLs) overrides which categories are crawled, and
-     `DHAKAFLIX_MAX_IMPORTS` caps how many new titles one Sync imports
-     (default 300; press Sync again for the next slice).
 3. `npm run dev` and open http://localhost:3000. That is the whole stack —
    there is nothing else to run (no rclone daemon, no separate services).
 4. `node scripts/test-gdrive.js` and `node scripts/test-tmdb.js` exercise the
    Drive and TMDb integrations against the real APIs (need the credentials
    above in `.env.local`); `npm run test:db` covers the Mongo indexes.
-   `node scripts/test-dhakaflix.js` crawls the ISP index — it only works from
-   inside that network.
-5. `npm run migrate` after upgrading: DhakaFlix items are deduped on a new
-   unique `sourceUrl` index.
 
 ## Cost
 

@@ -67,41 +67,6 @@ file bytes, only metadata.
    /api/media/progress for resume support
 ```
 
-## Second source: DhakaFlix (the ISP index)
-
-```
-1. Sync crawls the configured DHAKAFLIX_ROOTS (h5ai directory listings on
-   172.16.50.7/.9/.12/.14) breadth-first, reading only listings
-2. Each video file found becomes a media/episode doc with
-   source: 'dhakaflix' and sourceUrl: the file's http:// URL — the same
-   filename -> TMDb -> Mongo pipeline a Drive file goes through
-3. Playback: GET /api/media/stream/[id] answers a DhakaFlix item with a 302
-   to sourceUrl. The player fetches the origin directly; no byte ever passes
-   through this app
-```
-
-A doc carries exactly one address for its bytes — `driveFileId` or
-`sourceUrl`, decided by `source` — and both are unique sparse indexes so a
-re-crawl cannot import the same file twice.
-
-### Why the bytes are not proxied
-
-172.16.50.x is on the ISP's private network. A public deploy cannot reach it
-at all, and even on-net, relaying feature films through a function would add a
-bandwidth bill and a timeout to a job nginx already does properly (it serves
-Range requests natively — verified 206 on a 1.8 GB file). The cost of the
-redirect is that the origin is plain HTTP: a browser on an HTTPS page blocks
-the redirected request as mixed content. The Android TV client (ExoPlayer,
-which has no such rule) is unaffected, and the detail page says so rather than
-letting the player fail silently.
-
-### Why the import is sliced
-
-One root alone holds thousands of files and every new title costs a TMDb
-lookup. A sync imports at most `DHAKAFLIX_MAX_IMPORTS` (default 300) and
-reports `remaining`, so the work is resumable instead of one request that
-cannot finish.
-
 ## Why Google Drive as the sole backend, not a pool
 
 The prior iteration used `rclone union` across eleven providers plus a
