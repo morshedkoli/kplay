@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.kdrive.tv.data.ApiClient
+import com.kdrive.tv.data.ApiError
 import com.kdrive.tv.data.Episode
 import com.kdrive.tv.data.MediaDetail
 import com.kdrive.tv.ui.components.ActionButton
@@ -68,6 +69,9 @@ fun DetailScreen(
 ) {
     var detail by remember { mutableStateOf<MediaDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Set when the server no longer has this title at all, which reads
+    // differently from a server that could not be reached.
+    var removed by remember { mutableStateOf(false) }
     var season by remember { mutableStateOf<Int?>(null) }
 
     // Without an explicit claim nothing on this screen holds focus, and a
@@ -80,6 +84,13 @@ fun DetailScreen(
             val loaded = api.getMedia(mediaId)
             detail = loaded
             season = loaded.seasons().firstOrNull()?.first
+        } catch (e: ApiError) {
+            // 404 is not a failure to report as one: it means the title was
+            // deleted on the server after this rail was loaded. Say that,
+            // rather than showing an HTTP status for something the viewer did
+            // nothing wrong to cause.
+            removed = e.httpStatus == 404
+            error = if (removed) "This title is no longer in your library." else e.message
         } catch (e: Exception) {
             error = e.message ?: "Couldn't load this title"
         }
@@ -96,7 +107,11 @@ fun DetailScreen(
         when {
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Couldn't load this title", style = K.PageTitle, color = K.TextPrimary)
+                    Text(
+                        if (removed) "Removed from your library" else "Couldn't load this title",
+                        style = K.PageTitle,
+                        color = K.TextPrimary,
+                    )
                     Text(error!!, style = K.Body, color = K.TextMuted)
                 }
             }
