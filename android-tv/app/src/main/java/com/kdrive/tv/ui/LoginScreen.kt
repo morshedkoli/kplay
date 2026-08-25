@@ -32,7 +32,7 @@ fun LoginScreen(
     busy: Boolean,
     onSubmit: (serverUrl: String, deviceKey: String) -> Unit,
 ) {
-    var serverUrl by remember { mutableStateOf("http://") }
+    var serverUrl by remember { mutableStateOf("https://") }
     var deviceKey by remember { mutableStateOf("") }
 
     Column(
@@ -50,7 +50,10 @@ fun LoginScreen(
         OutlinedTextField(
             value = serverUrl,
             onValueChange = { serverUrl = it },
-            label = { Text("Server URL (e.g. http://192.168.1.10:3000)") },
+            // HTTPS only: the app has no cleartext permission, so an http://
+            // address would be refused by the platform before it reached the
+            // server.
+            label = { Text("Server URL (e.g. https://kplay.example.com)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             modifier = Modifier.width(480.dp),
         )
