@@ -1,11 +1,11 @@
-# KDrive TV
+# kPlay for Android TV
 
 Native Android TV app (Kotlin, Jetpack Compose for TV, Media3/ExoPlayer) for browsing and playing
-everything in your KDrive library — movies and series alike.
+everything in your kPlay library — movies and series alike.
 
 ## What this is
 
-- **Login** — enter your KDrive server URL and device key (`KDRIVE_DEVICE_KEY` from your server's
+- **Login** — enter your kPlay server URL and device key (`KDRIVE_DEVICE_KEY` from your server's
   env). Validated against `GET /api/media/list` before saving.
 - **Browse** — a D-pad-navigable poster grid from `GET /api/media/list`, showing **Movies** and
   **Series** as two labelled sections. Series tiles carry an episode count. Posters load straight
@@ -41,7 +41,7 @@ nav rail imports them.
 **Easiest — let CI build it.** Pushing any change under `android-tv/` runs
 `.github/workflows/android-tv.yml`, which builds a debug APK on a GitHub runner and attaches it to
 the run. You can also start it by hand: Actions → *Android TV APK* → **Run workflow**. Download the
-`kdrive-tv-debug-apk` artifact when it finishes.
+`kplay-tv-debug-apk` artifact when it finishes.
 
 This route exists because building an APK needs a JDK and the Android SDK, and the runners already
 have both.

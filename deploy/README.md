@@ -1,4 +1,4 @@
-# Deploying KDrive to a VPS
+# Deploying kPlay to a VPS
 
 Docker Compose runs the app on `127.0.0.1:3100`; nginx on the host terminates
 TLS and proxies to it. MongoDB stays on Atlas.

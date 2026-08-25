@@ -1,4 +1,4 @@
-# KDrive
+# kPlay
 
 A Jellyfin-style movie/TV media server. Upload a video file, and the app
 stores the bytes in **Google Drive** (the sole storage backend), auto-matches

@@ -68,7 +68,7 @@ export default function Sidebar() {
           K
         </span>
         <span className="hidden text-sm font-semibold tracking-tight text-[var(--ink)] sm:inline">
-          KDrive
+          kPlay
         </span>
       </Link>
 

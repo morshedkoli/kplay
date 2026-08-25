@@ -1,4 +1,4 @@
-# Multi-stage build for the KDrive Next.js app.
+# Multi-stage build for the kPlay Next.js app.
 #
 # The runtime stage ships only the standalone server produced by
 # `output: 'standalone'` — no source, no dev dependencies, no npm install on

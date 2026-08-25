@@ -1,4 +1,4 @@
-# PRD — KDrive
+# PRD — kPlay
 **A single-user, self-hosted movie/TV media server backed by Google Drive**
 
 Owner: Murshed

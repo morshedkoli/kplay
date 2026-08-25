@@ -41,7 +41,7 @@ fun LoginScreen(
     ) {
         Text("kPlay", style = K.Hero, color = K.TextPrimary)
         Text(
-            "Enter your KDrive server address and device key.",
+            "Enter your kPlay server address and device key.",
             style = K.Body,
             color = K.TextMuted,
             modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),

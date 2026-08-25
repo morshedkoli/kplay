@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "KDriveTV"
+rootProject.name = "kPlayTV"
 include(":app")

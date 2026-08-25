@@ -45,7 +45,7 @@ function LoginForm() {
         <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--accent)] text-lg font-bold text-white">
           K
         </span>
-        <h1 className="mt-4 text-xl font-semibold text-[var(--ink)]">KDrive</h1>
+        <h1 className="mt-4 text-xl font-semibold text-[var(--ink)]">kPlay</h1>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">Sign in to browse your backups.</p>
 
         <form onSubmit={submit} className="mt-6 space-y-3">

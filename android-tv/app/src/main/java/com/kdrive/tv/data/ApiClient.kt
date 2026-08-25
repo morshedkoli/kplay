@@ -21,7 +21,7 @@ private data class ProgressResponse(val positionSeconds: Double = 0.0)
 @Serializable
 private data class ProgressRequest(val id: String, val positionSeconds: Double)
 
-/** Thin client for the KDrive media API — GET /api/media/list, GET /api/media/[id],
+/** Thin client for the kPlay media API — GET /api/media/list, GET /api/media/[id],
  * and the progress endpoints. Auth is the shared device key header. */
 class ApiClient(private val credentials: Credentials) {
 

@@ -48,7 +48,7 @@ const CLIENTS = [
     meta: 'Next.js 15 · App Router',
   },
   {
-    name: 'kPlay for Android TV',
+    name: 'Android TV',
     body: 'A native Compose app for the television: D-pad browse, a focus-following hero, Media3 playback with an on-disk cache, audio-track selection, and its own Sync button.',
     meta: 'Kotlin · Media3 · sideloaded APK',
   },
@@ -126,7 +126,7 @@ function Hero({ admin }) {
         K
       </span>
       <h1 className="mt-6 text-3xl font-semibold tracking-tight text-[var(--ink)] sm:text-4xl">
-        KDrive
+        kPlay
       </h1>
       <p className="mt-3 max-w-2xl text-base leading-relaxed text-[var(--ink-soft)]">
         A private media server for one household. Video files live in your own Google Drive; this
