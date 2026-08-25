@@ -50,6 +50,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
@@ -155,6 +156,33 @@ private fun audioDetail(channelCount: Int, codecs: String?): String? {
     return parts.joinToString(" · ").takeIf { it.isNotEmpty() }
 }
 
+
+/**
+ * Where a seek keypress should wind to, or null when this file cannot be
+ * seeked at all.
+ *
+ * Split out from the screen so the rule can be tested without a player: the
+ * refusal is the whole point of the fix, and a rule that silently stopped
+ * refusing would put the bug straight back.
+ *
+ * `seekable` is null until the timeline arrives. Winding is allowed then —
+ * the player queues the seek, and a file that turns out to be unseekable
+ * loses nothing it would not have lost anyway.
+ */
+internal fun seekTargetFor(
+    currentMs: Long,
+    pendingMs: Long?,
+    deltaMs: Long,
+    durationMs: Long,
+    seekable: Boolean?,
+): Long? {
+    if (seekable == false) return null
+    val from = pendingMs ?: currentMs
+    // An unknown duration must not become a ceiling of zero, which would pin
+    // every forward wind to the start — the very thing being fixed.
+    val limit = if (durationMs > 0) durationMs else Long.MAX_VALUE
+    return (from + deltaMs).coerceIn(0L, limit)
+}
 /**
  * Turns a playback failure into something worth putting on a television.
  *
@@ -262,6 +290,14 @@ fun PlayerScreen(
     // play" looked like from the sofa: no message, no retry, no clue.
     var failure by remember { mutableStateOf<String?>(null) }
     var audio by remember { mutableStateOf<List<AudioOption>>(emptyList()) }
+    // Null until the timeline arrives, then whether this file can be seeked
+    // at all. A Matroska file with no Cues index reports false, and every
+    // seek into it lands at zero.
+    var seekable by remember { mutableStateOf<Boolean?>(null) }
+    // Shown briefly when a wind was refused, so the remote does not feel dead.
+    var seekRefused by remember { mutableStateOf(false) }
+    // The resume position, held until we know whether seeking to it will work.
+    var pendingResumeMs by remember { mutableStateOf<Long?>(null) }
     var audioMenuVisible by remember { mutableStateOf(false) }
     var audioCursor by remember { mutableIntStateOf(0) }
 
@@ -283,6 +319,23 @@ fun PlayerScreen(
                 if (state == Player.STATE_ENDED) controlsVisible = true
             }
 
+
+            /**
+             * The timeline is where seekability becomes known.
+             *
+             * ProgressiveMediaSource reports a window as unseekable when the
+             * extractor could not build a seek map — a Matroska file whose
+             * Cues index is missing, or is only reachable through a second
+             * SeekHead that MatroskaExtractor does not follow. Six of
+             * thirteen files in the library at the time of writing were in
+             * that state.
+             */
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (timeline.isEmpty) return
+                val window = timeline.getWindow(player.currentMediaItemIndex, Timeline.Window())
+                seekable = window.isSeekable
+            }
+
             override fun onTracksChanged(tracks: Tracks) {
                 audio = audioOptions(tracks)
                 val selected = audio.indexOfFirst { it.selected }
@@ -301,9 +354,33 @@ fun PlayerScreen(
 
     LaunchedEffect(mediaId) {
         val resumeSeconds = api.getProgress(mediaId)
-        if (resumeSeconds > 0) player.seekTo((resumeSeconds * 1000).toLong())
+        if (resumeSeconds > 0) pendingResumeMs = (resumeSeconds * 1000).toLong()
         player.playWhenReady = true
         focusRequester.requestFocus()
+    }
+
+    // Resuming waits for the timeline, because resuming into an unseekable
+    // file lands at zero — which looked like "it forgot where I was" and then
+    // overwrote the saved position with the opening minute.
+    LaunchedEffect(seekable, pendingResumeMs) {
+        val resumeMs = pendingResumeMs ?: return@LaunchedEffect
+        when (seekable) {
+            null -> return@LaunchedEffect // not known yet; ask again when it is
+            true -> {
+                player.seekTo(resumeMs)
+                position = resumeMs
+            }
+
+            false -> Unit // start from the beginning, the only place it can start
+        }
+        pendingResumeMs = null
+    }
+
+    // The refusal notice clears itself; it is a nudge, not a state to escape.
+    LaunchedEffect(seekRefused) {
+        if (!seekRefused) return@LaunchedEffect
+        delay(2_500)
+        seekRefused = false
     }
 
     // Drives the scrubber. Polling beats a listener here: Player has no
@@ -371,9 +448,23 @@ fun PlayerScreen(
      * held key scrub smoothly rather than stutter through repeated seeks.
      */
     fun seekBy(deltaMs: Long) {
-        val from = seekTargetMs ?: player.currentPosition
-        val limit = if (player.duration > 0) player.duration else Long.MAX_VALUE
-        seekTargetMs = (from + deltaMs).coerceIn(0L, limit)
+        val target = seekTargetFor(
+            currentMs = player.currentPosition,
+            pendingMs = seekTargetMs,
+            deltaMs = deltaMs,
+            durationMs = player.duration,
+            seekable = seekable,
+        )
+        if (target == null) {
+            // Refusing beats obeying. ExoPlayer treats a seek into unseekable
+            // media as a seek to t=0, so the press the user just made would
+            // throw them back to the opening titles — which is exactly the
+            // bug this guard exists to stop.
+            seekRefused = true
+            touch()
+            return
+        }
+        seekTargetMs = target
         touch()
     }
 
@@ -576,6 +667,8 @@ fun PlayerScreen(
                 isPlaying = isPlaying,
                 seekTargetMs = seekTargetMs,
                 hasAudioChoice = audio.size > 1,
+                seekable = seekable != false,
+                seekRefused = seekRefused,
             )
         }
     }
@@ -687,6 +780,8 @@ internal fun Controls(
     isPlaying: Boolean,
     seekTargetMs: Long?,
     hasAudioChoice: Boolean = false,
+    seekable: Boolean = true,
+    seekRefused: Boolean = false,
 ) {
     // While scrubbing the bar and the clock show where you are winding to,
     // not where playback still is — otherwise the numbers argue with the
@@ -710,6 +805,21 @@ internal fun Controls(
                 color = K.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        // Said plainly, and only when it matters. A viewer pressing fast
+        // forward on a file that cannot be seeked deserves to be told why
+        // nothing happened rather than left pressing harder.
+        if (!seekable) {
+            Text(
+                if (seekRefused) {
+                    "This file has no seek index, so it can only play straight through."
+                } else {
+                    "No seek index in this file — seeking is unavailable."
+                },
+                style = K.Body,
+                color = if (seekRefused) K.Accent else K.TextMuted,
             )
         }
 
@@ -750,7 +860,8 @@ internal fun Controls(
             Text(
                 buildString {
                     append(if (isPlaying) "OK  PAUSE" else "OK  PLAY")
-                    append("      ◀ ▶  10s      ◀◀ ▶▶  30s")
+                    // No point advertising keys that this file will refuse.
+                    if (seekable) append("      ◀ ▶  10s      ◀◀ ▶▶  30s")
                     if (hasAudioChoice) append("      MENU  AUDIO")
                 },
                 style = K.Eyebrow,
