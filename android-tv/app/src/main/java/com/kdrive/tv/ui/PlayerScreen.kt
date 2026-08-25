@@ -57,6 +57,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.kdrive.tv.data.ApiClient
+import com.kdrive.tv.data.CueSeekMap
 import com.kdrive.tv.data.loadControl
 import com.kdrive.tv.data.mediaSourceFactory
 import com.kdrive.tv.data.renderersFactory
@@ -259,15 +260,13 @@ fun PlayerScreen(
     // Built from the shared playback configuration: cached HTTP, deep
     // buffers, decoder fallback. data/Playback.kt has the reasoning for why
     // none of those are left at their defaults.
+    // Built empty: what it plays is decided once the server has been asked
+    // for a seek table, because that table has to be in the extractor before
+    // preparation, not after. See the LaunchedEffect below.
     val player = remember {
         ExoPlayer.Builder(context, renderersFactory(context))
-            .setMediaSourceFactory(mediaSourceFactory(context, api))
             .setLoadControl(loadControl())
             .build()
-            .apply {
-                setMediaItem(MediaItem.fromUri(api.streamUrl(mediaId)))
-                prepare()
-            }
     }
 
     var controlsVisible by remember { mutableStateOf(true) }
@@ -296,6 +295,9 @@ fun PlayerScreen(
     var seekable by remember { mutableStateOf<Boolean?>(null) }
     // Shown briefly when a wind was refused, so the remote does not feel dead.
     var seekRefused by remember { mutableStateOf(false) }
+    // True once a server-built seek table has been handed to the extractor, so
+    // a file that would have reported itself unseekable now seeks.
+    var indexed by remember { mutableStateOf(false) }
     // The resume position, held until we know whether seeking to it will work.
     var pendingResumeMs by remember { mutableStateOf<Long?>(null) }
     var audioMenuVisible by remember { mutableStateOf(false) }
@@ -352,9 +354,29 @@ fun PlayerScreen(
         onDispose { player.removeListener(listener) }
     }
 
+    // Everything that has to happen before the first frame, in one place
+    // because the order matters: the seek table has to reach the extractor
+    // before preparation, and the resume position has to be known before the
+    // timeline decides whether it can be honoured.
     LaunchedEffect(mediaId) {
         val resumeSeconds = api.getProgress(mediaId)
         if (resumeSeconds > 0) pendingResumeMs = (resumeSeconds * 1000).toLong()
+
+        // A Matroska file whose Cues the extractor cannot reach reports itself
+        // unseekable, and every wind then lands at zero. The server rebuilds
+        // the table from the file itself; a null answer just means there was
+        // nothing to recover, and playback proceeds exactly as before.
+        val index = api.getSeekIndex(mediaId)
+        val seekMap = index
+            ?.takeIf { it.seekable }
+            ?.let { CueSeekMap.from(it.cues, (it.durationMs ?: 0L) * 1000) }
+        indexed = seekMap != null
+
+        player.setMediaSource(
+            mediaSourceFactory(context, api, seekMap)
+                .createMediaSource(MediaItem.fromUri(api.streamUrl(mediaId)))
+        )
+        player.prepare()
         player.playWhenReady = true
         focusRequester.requestFocus()
     }
@@ -362,9 +384,9 @@ fun PlayerScreen(
     // Resuming waits for the timeline, because resuming into an unseekable
     // file lands at zero — which looked like "it forgot where I was" and then
     // overwrote the saved position with the opening minute.
-    LaunchedEffect(seekable, pendingResumeMs) {
+    LaunchedEffect(seekable, indexed, pendingResumeMs) {
         val resumeMs = pendingResumeMs ?: return@LaunchedEffect
-        when (seekable) {
+        when (if (indexed) true else seekable) {
             null -> return@LaunchedEffect // not known yet; ask again when it is
             true -> {
                 player.seekTo(resumeMs)
@@ -453,7 +475,10 @@ fun PlayerScreen(
             pendingMs = seekTargetMs,
             deltaMs = deltaMs,
             durationMs = player.duration,
-            seekable = seekable,
+            // A server-built table makes the file seekable whatever the
+            // extractor concluded on its own, and it is handed over before
+            // preparation — so it is known good before the timeline arrives.
+            seekable = if (indexed) true else seekable,
         )
         if (target == null) {
             // Refusing beats obeying. ExoPlayer treats a seek into unseekable

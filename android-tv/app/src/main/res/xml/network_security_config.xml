@@ -1,13 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Android 9 and later refuse cleartext HTTP unless an app opts back in, which
-    this one has to do for two separate reasons:
-
-      * a kPlay server on the local network is reached at http://<lan-ip>:3000,
-        with no certificate to serve; and
-      * a DhakaFlix title is answered by /api/media/stream/[id] with a 302 to
-        the ISP index at http://172.16.50.x, so the player follows a plain-HTTP
-        redirect even when the server itself is HTTPS.
+    Android 9 and later refuse cleartext HTTP unless an app opts back in, and
+    this app has to: a kPlay server on the local network is reached at
+    http://<lan-ip>:3000, with no certificate to serve.
 
     Without this the app failed with "Cleartext communication ... not permitted
     by network security policy" before it could load the library at all.

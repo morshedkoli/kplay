@@ -56,7 +56,9 @@ kdrive/                       ← the Next.js 15 app itself (full stack)
 │   ├── gdrive.js              ← Google Drive API v3 wrapper (upload/stream/
 │   │                             metadata/delete) — the only storage backend
 │   ├── library/               ← parse.js, tmdb.js, match.js — filename
-│   │                             parsing + TMDb auto-matching
+│   │                             parsing + TMDb auto-matching;
+│   │                             mkv-index.js — seek tables for files the
+│   │                             player cannot seek by itself
 │   ├── models/media.js        ← media/episode Mongo schema helpers
 │   └── db.js  auth.js  session-cookie.js  admin-auth.js  env.js
 │                                format.js

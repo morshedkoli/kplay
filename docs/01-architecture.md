@@ -80,6 +80,37 @@ still use R2), `lib/rclone-rc.js`, `lib/storage-router.js`, and the
 Telegram fallback module — all deleted. A Drive API error now surfaces
 directly to the client; there is nothing to fall back to, by design.
 
+## Seeking a file the player says it cannot seek
+
+```
+1. Playback starts: the TV client asks GET /api/media/seek-index/[id]
+2. lib/library/mkv-index.js reads a few byte ranges of the Drive file and
+   returns a table of [timeMs, byteOffset] pairs, cached in Mongo
+   (`seekIndex`) so the work happens once per file
+3. The client wraps its extractors so the table replaces the unseekable
+   SeekMap the extractor published, then prepares playback
+4. Fast forward now moves the film instead of restarting it
+```
+
+A Matroska file keeps its seek index in a Cues element announced by a
+SeekHead. ExoPlayer's MatroskaExtractor reads the first SeekHead and no
+further, so when a muxer chains a second one the extractor finds no Cues,
+publishes an unseekable SeekMap, and ProgressiveMediaPeriod then treats every
+seek as a seek to t=0 — which from the sofa is fast-forward restarting the
+film.
+
+The index is in the file; only the route to it is one the player will not
+walk. So the server walks it, over three strategies, cheapest first: follow
+the SeekHead chain, then look for a Cues element at the end of the file, then
+— for a file with no Cues at all — hop cluster to cluster reading each
+cluster's header, which its size field makes arithmetic rather than a search.
+No file is ever downloaded, re-encoded or re-uploaded.
+
+Substituting the seek map is safe because every offset in the table is the
+start of a Cluster, the same position the extractor's own Cues path would have
+produced. A file that already seeks keeps its own index: the wrapper only
+replaces a map that says it cannot seek.
+
 ## Why direct-play only, no transcoding
 
 Transcoding requires either real-time server-side CPU/GPU work or a

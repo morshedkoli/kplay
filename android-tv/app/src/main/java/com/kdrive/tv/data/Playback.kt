@@ -119,7 +119,7 @@ fun cachingDataSourceFactory(context: Context, api: ApiClient): DataSource.Facto
  *    difference between a broadcast capture playing and not.
  */
 @OptIn(UnstableApi::class)
-private fun extractorsFactory() = DefaultExtractorsFactory()
+internal fun extractorsFactory() = DefaultExtractorsFactory()
     .setConstantBitrateSeekingEnabled(true)
     .setConstantBitrateSeekingAlwaysEnabled(true)
     .setMp4ExtractorFlags(Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS)
@@ -135,9 +135,21 @@ private fun extractorsFactory() = DefaultExtractorsFactory()
  * files that are the norm here.
  */
 @OptIn(UnstableApi::class)
-fun mediaSourceFactory(context: Context, api: ApiClient): MediaSource.Factory =
-    DefaultMediaSourceFactory(cachingDataSourceFactory(context, api), extractorsFactory())
+fun mediaSourceFactory(
+    context: Context,
+    api: ApiClient,
+    seekMap: CueSeekMap? = null,
+): MediaSource.Factory {
+    // With a table from the server, every extractor is wrapped so a file the
+    // extractor calls unseekable picks it up instead. Without one, nothing
+    // changes — see data/SeekIndex.kt for what the wrapping does and why the
+    // byte offsets it seeks to are safe ones.
+    val extractors = extractorsFactory()
+        .let { if (seekMap != null) SeekIndexExtractorsFactory(it, seekMap) else it }
+
+    return DefaultMediaSourceFactory(cachingDataSourceFactory(context, api), extractors)
         .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(LOAD_ERROR_RETRIES))
+}
 
 /**
  * Renderers with decoder fallback on.

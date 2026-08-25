@@ -21,6 +21,18 @@ private data class ProgressResponse(val positionSeconds: Double = 0.0)
 @Serializable
 private data class ProgressRequest(val id: String, val positionSeconds: Double)
 
+/**
+ * The server's time-to-byte table for a file the extractor cannot seek in.
+ * `cues` is a list of [timeMs, byteOffset] pairs, ascending by time.
+ */
+@Serializable
+data class SeekIndexResponse(
+    val seekable: Boolean = false,
+    val method: String = "",
+    val durationMs: Long? = null,
+    val cues: List<List<Long>> = emptyList(),
+)
+
 /** Thin client for the kPlay media API — GET /api/media/list, GET /api/media/[id],
  * and the progress endpoints. Auth is the shared device key header. */
 class ApiClient(private val credentials: Credentials) {
@@ -111,6 +123,26 @@ class ApiClient(private val credentials: Credentials) {
             json.decodeFromString(ProgressResponse.serializer(), body).positionSeconds
         } catch (e: Exception) {
             0.0
+        }
+    }
+
+    /**
+     * The seek table for one file, or null when the server has none to give.
+     *
+     * Building one can mean walking a large file's cluster headers, so this
+     * gets the patient client rather than the 30-second one — but a failure
+     * is never fatal: playback proceeds with whatever seekability the
+     * extractor worked out for itself.
+     */
+    suspend fun getSeekIndex(id: String): SeekIndexResponse? = withContext(Dispatchers.IO) {
+        try {
+            scanHttp.newCall(request("/api/media/seek-index/$id")).execute().use { res ->
+                if (!res.isSuccessful) return@withContext null
+                val body = res.body?.string().orEmpty()
+                json.decodeFromString(SeekIndexResponse.serializer(), body)
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 

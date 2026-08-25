@@ -10,12 +10,15 @@
 // ProgressiveMediaPeriod then documents its behaviour plainly: "Treat all
 // seeks into non-seekable media as being to t=0."
 //
-// So a file listed as NO SEEK INDEX below will restart from the beginning
-// every time someone presses fast forward on the TV. The app now refuses the
-// seek instead, which stops the jump but does not bring seeking back.
+// A file listed as NO SEEK INDEX below is one MatroskaExtractor cannot seek
+// on its own. That no longer means it cannot be seeked: GET /api/media/seek-
+// index/[id] rebuilds the table from the file itself and the TV client hands
+// it to the extractor before playback (lib/library/mkv-index.js, and
+// android-tv .../data/SeekIndex.kt). This script stays useful as the quick
+// answer to which files take that path.
 //
-// The fix is to rewrite the container once, which is a remux and not a
-// re-encode — seconds of work, no quality loss:
+// Remuxing the container is still the way to make a file seek natively
+// everywhere, including in a browser — seconds of work, no quality loss:
 //
 //   mkvmerge -o fixed.mkv original.mkv
 //
