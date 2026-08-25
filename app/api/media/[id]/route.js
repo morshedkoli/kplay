@@ -2,6 +2,12 @@
 // DELETE /api/media/[id] — removes the catalog doc(s) and the underlying
 //                          Drive file(s). Movie: one doc, one file. Series:
 //                          the parent doc plus every episode and its file.
+//
+//                          A DhakaFlix item has no driveFileId, so the delete
+//                          falls through to the catalog cleanup alone — the
+//                          ISP's files are not ours to remove, and dropping
+//                          the doc simply un-lists the title until the next
+//                          sync re-imports it.
 
 import { ObjectId } from 'mongodb';
 

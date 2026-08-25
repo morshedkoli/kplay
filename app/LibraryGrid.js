@@ -98,6 +98,15 @@ function PosterTile({ item, kind, basePath }) {
           unmatched
         </span>
       ) : null}
+
+      {item.source === 'dhakaflix' ? (
+        <span
+          title="Streams from the DhakaFlix server — needs the ISP network"
+          className="absolute right-1.5 top-1.5 rounded-full bg-sky-600 px-1.5 py-0.5 text-[10px] font-medium text-white shadow"
+        >
+          DhakaFlix
+        </span>
+      ) : null}
     </Link>
   );
 }

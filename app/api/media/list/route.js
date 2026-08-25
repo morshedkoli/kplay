@@ -29,6 +29,9 @@ export async function GET(request) {
           // each item's detail just to render one paragraph.
           description: 1,
           status: 1,
+          // Which backend holds the bytes, so the grid can badge a title the web
+          // player may not be able to reach over HTTPS.
+          source: 1,
           createdAt: 1,
         },
       }

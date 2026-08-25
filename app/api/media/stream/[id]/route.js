@@ -15,6 +15,16 @@
 // but Drive serves these files as `application/octet-stream` with
 // `X-Content-Type-Options: nosniff` and no `Access-Control-Allow-Origin`, so
 // a browser <video> refuses them both with and without `crossorigin`.
+//
+// A DhakaFlix item is the opposite case and is answered with a 302 to its
+// origin instead of any proxying at all. Two reasons: the index lives on the
+// ISP's private network (172.16.50.x), which a public deploy cannot reach in
+// the first place, and its nginx already serves byte ranges properly, so
+// relaying whole films through this route would only add a bandwidth bill and
+// a function timeout. The consequence to know about: the origin is plain HTTP,
+// so a browser on an HTTPS page blocks the redirected request as mixed
+// content. The Android TV client (ExoPlayer, no such rule) and the app served
+// over HTTP on the local network both play it fine.
 
 import { Readable } from 'node:stream';
 
@@ -44,15 +54,18 @@ const MAX_CHUNK_BYTES = Number(process.env.STREAM_MAX_CHUNK_BYTES || 0);
 // file is not served stale forever.
 const CACHE_SECONDS = 86400;
 
-async function resolveDriveFileId(id) {
+/**
+ * The doc holding this id's bytes, movie or episode. Returns the doc itself
+ * rather than one address, because which field to read depends on its source.
+ */
+async function resolveDoc(id) {
   const _id = new ObjectId(id);
   const media = await mediaCollection();
   const mediaDoc = await media.findOne({ _id });
-  if (mediaDoc?.driveFileId) return mediaDoc.driveFileId;
+  if (mediaDoc?.driveFileId || mediaDoc?.sourceUrl) return mediaDoc;
 
   const episodes = await episodeCollection();
-  const episodeDoc = await episodes.findOne({ _id });
-  return episodeDoc?.driveFileId ?? null;
+  return episodes.findOne({ _id });
 }
 
 /**
@@ -86,12 +99,26 @@ export async function GET(request, { params }) {
   if (authError) return authError;
 
   const { id } = await params;
-  let driveFileId;
+  let doc;
   try {
-    driveFileId = await resolveDriveFileId(id);
+    doc = await resolveDoc(id);
   } catch (err) {
     return Response.json({ error: 'Invalid id' }, { status: 400 });
   }
+  if (!doc) return Response.json({ error: 'Not found' }, { status: 404 });
+
+  // DhakaFlix bytes are never proxied — see the note at the top of this file.
+  // A 302 keeps one stream URL for every client: ExoPlayer and <video> both
+  // follow it, and the Range request lands on the origin's nginx, which serves
+  // ranges natively.
+  if (doc.sourceUrl) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: doc.sourceUrl, 'Cache-Control': 'private, no-store' },
+    });
+  }
+
+  const { driveFileId } = doc;
   if (!driveFileId) return Response.json({ error: 'Not found' }, { status: 404 });
 
   let meta;
