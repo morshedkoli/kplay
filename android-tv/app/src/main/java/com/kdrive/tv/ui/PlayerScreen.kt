@@ -43,6 +43,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -234,8 +235,9 @@ private fun describe(error: PlaybackException): String = when (error.errorCode) 
  *   Centre / Enter / Play-Pause  toggle playback
  *   Left / Right                 wind ∓10s, accumulating
  *   Rewind / Fast-forward        wind ∓30s, accumulating
- *   Up                           show the controls
- *   Menu / Info                  audio track list, when the file has more than one
+ *   Up                           audio track list when the file carries more
+ *                                than one soundtrack, otherwise the controls
+ *   Menu / Info                  the same list, on remotes that have those keys
  *   Down / Back                  hide the controls, then leave
  *
  * Seeking accumulates the way it does on a phone: presses move a target that
@@ -308,6 +310,17 @@ fun PlayerScreen(
     fun touch() {
         controlsVisible = true
         lastInteraction += 1
+    }
+
+    // Android TV runs an idle-input sleep timer, and a remote nobody is
+    // pressing during a film counts as idle — which is why playback was being
+    // cut off mid-title. Holding the screen awake for as long as this screen
+    // is composed prevents that; the flag is dropped on the way out, so the
+    // television still sleeps when nothing is playing.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
     }
 
     DisposableEffect(player) {
@@ -616,7 +629,19 @@ fun PlayerScreen(
                         }
                     }
 
-                    Key.DirectionUp -> { touch(); true }
+                    // Up is the dependable way onto the audio list. Plenty of
+                    // TV remotes have no MENU or INFO key at all, so a menu
+                    // bound only to those keys could not be reached from the
+                    // sofa; the arrow keys are the one part of a remote that
+                    // always exists.
+                    Key.DirectionUp -> {
+                        if (audio.size > 1) {
+                            audioCursor = audio.indexOfFirst { it.selected }.coerceAtLeast(0)
+                            audioMenuVisible = true
+                        }
+                        touch()
+                        true
+                    }
 
                     Key.DirectionDown -> {
                         if (controlsVisible) { controlsVisible = false; true } else false
@@ -887,7 +912,7 @@ internal fun Controls(
                     append(if (isPlaying) "OK  PAUSE" else "OK  PLAY")
                     // No point advertising keys that this file will refuse.
                     if (seekable) append("      ◀ ▶  10s      ◀◀ ▶▶  30s")
-                    if (hasAudioChoice) append("      MENU  AUDIO")
+                    if (hasAudioChoice) append("      ▲  AUDIO")
                 },
                 style = K.Eyebrow,
                 color = K.TextFaint,

@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,7 +73,13 @@ fun DetailScreen(
     // Set when the server no longer has this title at all, which reads
     // differently from a server that could not be reached.
     var removed by remember { mutableStateOf(false) }
-    var season by remember { mutableStateOf<Int?>(null) }
+    // Saveable, not plain remember: navigating into the player disposes this
+    // screen, and coming back must land on the same season — not season one.
+    var season by rememberSaveable { mutableStateOf<Int?>(null) }
+    // The last thing played from this screen. It is what focus returns to on
+    // the way back, so a viewer who finishes episode 7 is standing on episode
+    // 7 rather than at the top of the list.
+    var lastPlayedId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Without an explicit claim nothing on this screen holds focus, and a
     // screen with no focus ignores the remote completely.
@@ -83,7 +90,9 @@ fun DetailScreen(
         try {
             val loaded = api.getMedia(mediaId)
             detail = loaded
-            season = loaded.seasons().firstOrNull()?.first
+            // Only when there is nothing to restore — otherwise a reload on
+            // the way back from the player would reset the season picker.
+            if (season == null) season = loaded.seasons().firstOrNull()?.first
         } catch (e: ApiError) {
             // 404 is not a failure to report as one: it means the title was
             // deleted on the server after this rail was loaded. Say that,
@@ -124,10 +133,14 @@ fun DetailScreen(
                 item = detail!!,
                 api = api,
                 imageLoader = imageLoader,
-                onPlay = onPlay,
+                onPlay = { id, label ->
+                    lastPlayedId = id
+                    onPlay(id, label)
+                },
                 season = season,
                 onSeason = { season = it },
                 firstAction = firstAction,
+                focusEpisodeId = lastPlayedId,
             )
         }
     }
@@ -146,6 +159,10 @@ internal fun DetailContent(
     season: Int? = item.seasons().firstOrNull()?.first,
     onSeason: (Int) -> Unit = {},
     firstAction: FocusRequester? = null,
+    /** Episode to put focus on instead of the first one — the episode this
+     * screen last launched, so returning from the player lands where the
+     * viewer left rather than at the top of the season. */
+    focusEpisodeId: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize().background(K.Ink)) {
@@ -239,6 +256,13 @@ internal fun DetailContent(
                                 ),
                             )
 
+                            // Where focus should land when this list appears:
+                            // the episode last played if it is in the season
+                            // on screen, otherwise the first one.
+                            val focusIndex = shown.second
+                                .indexOfFirst { it.id == focusEpisodeId }
+                                .takeIf { it >= 0 }
+
                             Column(
                                 Modifier.focusGroup(),
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -253,9 +277,15 @@ internal fun DetailContent(
                                             )
                                         },
                                         // With no Play button above, the first
-                                        // episode is the screen's entry point.
-                                        focusRequester =
-                                            if (index == 0 && seasons.size == 1) firstAction else null,
+                                        // episode is the screen's entry point
+                                        // — unless we are coming back from
+                                        // one, which claims focus instead.
+                                        focusRequester = when {
+                                            focusIndex != null ->
+                                                if (index == focusIndex) firstAction else null
+                                            index == 0 && seasons.size == 1 -> firstAction
+                                            else -> null
+                                        },
                                         modifier = Modifier.padding(horizontal = K.Gutter),
                                     )
                                 }
