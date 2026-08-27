@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.background
 import com.kdrive.tv.ui.components.ActionButton
+import com.kdrive.tv.ui.components.LogoBadge
 import com.kdrive.tv.ui.theme.K
 
 /** First-run screen: server URL + device key, the same
@@ -39,7 +40,13 @@ fun LoginScreen(
         modifier = Modifier.fillMaxSize().background(K.Ink).padding(64.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("kPlay", style = K.Hero, color = K.TextPrimary)
+        LogoBadge(size = 56.dp)
+        Text(
+            "kPlay",
+            style = K.Hero,
+            color = K.TextPrimary,
+            modifier = Modifier.padding(top = 16.dp),
+        )
         Text(
             "Enter your kPlay server address and device key.",
             style = K.Body,
@@ -61,7 +68,7 @@ fun LoginScreen(
         OutlinedTextField(
             value = deviceKey,
             onValueChange = { deviceKey = it },
-            label = { Text("Device key (KDRIVE_DEVICE_KEY)") },
+            label = { Text("Device key") },
             modifier = Modifier.width(480.dp).padding(top = 16.dp),
         )
 

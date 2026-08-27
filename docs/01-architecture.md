@@ -1,4 +1,4 @@
-# Architecture — KDrive
+# Architecture — kPlay
 
 This describes the media-server architecture that replaced the earlier
 photo-backup design. The authoritative source for this iteration is

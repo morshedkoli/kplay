@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Logo from '../Logo.js';
 
 function LoginForm() {
   const router = useRouter();
@@ -42,9 +43,7 @@ function LoginForm() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8 shadow-xl shadow-black/5">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--accent)] text-lg font-bold text-white">
-          K
-        </span>
+        <Logo size={44} rounded="rounded-xl" />
         <h1 className="mt-4 text-xl font-semibold text-[var(--ink)]">kPlay</h1>
         <p className="mt-1 text-sm text-[var(--ink-soft)]">Sign in to browse your backups.</p>
 

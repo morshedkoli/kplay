@@ -1,12 +1,18 @@
+<!-- The kPlay mark: a lowercase "k" whose arm and leg are one play triangle.
+     Same geometry as the web mark in app/Logo.js, drawn on that file's
+     48-unit grid and then scaled 1.5x and centred, which keeps every shape
+     inside the adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- stem of the k, round-capped -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34,30 L34,78 L46,78 L46,30 Z" />
+        android:pathData="M33,36 A4.5,4.5 0 0 1 42,36 L42,72 A4.5,4.5 0 0 1 33,72 Z" />
+    <!-- arm, leg and play glyph, all one shape -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M62,30 L62,78 L74,78 L74,30 Z" />
+        android:pathData="M49.5,36.9 L76.8,54 L49.5,71.1 Z" />
 </vector>

@@ -137,17 +137,10 @@ private fun Brand(expanded: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // The mark is a single accent block — at three metres a logotype would
-        // be unreadable anyway, so it earns its place as a colour cue.
-        Box(
-            Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(K.Accent),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("K", style = K.Section, color = K.TextPrimary)
-        }
+        // One accent tile carrying the mark. At three metres the shape is what
+        // reads, not a logotype — and the shape is a play button, which says
+        // what the app is before the name beside it does.
+        LogoBadge(size = 30.dp)
         if (expanded) Text("kPlay", style = K.Section, color = K.TextPrimary)
     }
 }

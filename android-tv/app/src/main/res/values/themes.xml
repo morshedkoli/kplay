@@ -1,6 +1,6 @@
 <resources>
     <style name="Theme.KPlayTV" parent="android:Theme.DeviceDefault.NoActionBar">
-        <item name="android:colorBackground">@color/kdrive_bg</item>
-        <item name="android:navigationBarColor">@color/kdrive_bg</item>
+        <item name="android:colorBackground">@color/kplay_bg</item>
+        <item name="android:navigationBarColor">@color/kplay_bg</item>
     </style>
 </resources>

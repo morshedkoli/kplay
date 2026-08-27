@@ -28,7 +28,7 @@ object K {
     /** The one saturated colour in the app. Spent only on the primary action
      * and the active nav indicator — everywhere else earns attention through
      * focus scale and white, the way the reference does. */
-    val Accent = Color(0xFFE50914)
+    val Accent = Color(0xFFE0464A)
 
     val TextPrimary = Color(0xFFFFFFFF)
     val TextMuted = Color(0xFFA3A3AD)

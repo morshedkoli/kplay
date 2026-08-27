@@ -39,6 +39,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import com.kdrive.tv.data.PIN_LENGTH
+import com.kdrive.tv.ui.components.LogoBadge
 import com.kdrive.tv.ui.theme.K
 import kotlinx.coroutines.delay
 
@@ -140,15 +141,7 @@ fun PinScreen(
                 modifier = Modifier.width(380.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(K.Accent),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("K", style = K.Section, color = K.TextPrimary)
-                }
+                LogoBadge(size = 44.dp)
 
                 Text(purpose.title, style = K.PageTitle, color = K.TextPrimary)
                 Text(purpose.hint, style = K.Body, color = K.TextMuted)

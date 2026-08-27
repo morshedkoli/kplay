@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import ApkDownload from './ApkDownload.js';
+import Logo from './Logo.js';
 import SyncButton from './SyncButton.js';
 
 const LINKS = [
@@ -64,9 +66,7 @@ export default function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-20 flex w-16 flex-col border-r border-[var(--border)] bg-[var(--surface)] py-4 sm:w-56">
       <Link href="/movies" className="mb-6 flex items-center gap-2 px-4">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
-          K
-        </span>
+        <Logo size={32} />
         <span className="hidden text-sm font-semibold tracking-tight text-[var(--ink)] sm:inline">
           kPlay
         </span>
@@ -108,6 +108,9 @@ export default function Sidebar() {
       {/* An action, not a destination — it updates whichever section you are
           already looking at, so it sits below the links rather than among them. */}
       <SyncButton />
+
+      {/* Only appears once a build has been staged with `npm run apk:stage`. */}
+      <ApkDownload />
 
       <button
         type="button"

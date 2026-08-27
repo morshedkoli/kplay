@@ -19,6 +19,7 @@ import Link from 'next/link';
 import { isAdmin } from '@/lib/admin-auth.js';
 import { formatBytes, formatDate } from '@/lib/format.js';
 import { getOverview } from '@/lib/library/overview.js';
+import Logo from './Logo.js';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -122,9 +123,7 @@ export default async function HomePage() {
 function Hero({ admin }) {
   return (
     <header>
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent)] text-xl font-bold text-white">
-        K
-      </span>
+      <Logo size={48} rounded="rounded-2xl" />
       <h1 className="mt-6 text-3xl font-semibold tracking-tight text-[var(--ink)] sm:text-4xl">
         kPlay
       </h1>
