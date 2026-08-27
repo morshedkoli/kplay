@@ -1,5 +1,5 @@
 {
-  "name": "kdrive",
+  "name": "kplay",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +9,8 @@
     "build": "next build",
     "start": "next start",
     "migrate": "node lib/migrations/001-indexes.js",
+    "apk:stage": "node scripts/stage-apk.js",
+    "apk:build": "cd android-tv && ./gradlew assembleDebug && cd .. && node scripts/stage-apk.js",
     "test": "node --test \"lib/**/*.test.js\"",
     "test:db": "node scripts/test-db.js",
     "test:gdrive": "node scripts/test-gdrive.js",

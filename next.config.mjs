@@ -13,6 +13,14 @@ const nextConfig = {
   // .next/standalone/node_modules instead.
   serverExternalPackages: ['mongodb', 'googleapis'],
 
+  // The staged Android TV APK is read from disk at request time, and nothing
+  // in the source graph references it — so tracing would leave it out of the
+  // standalone output and /api/apk would 404 on a deployed server. Naming it
+  // here is what puts the file in the bundle.
+  outputFileTracingIncludes: {
+    '/api/apk': ['./assets/android-tv/**'],
+  },
+
   // Nothing downstream needs to know which framework serves this.
   poweredByHeader: false,
 };
