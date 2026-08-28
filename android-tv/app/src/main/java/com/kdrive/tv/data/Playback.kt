@@ -108,7 +108,16 @@ object PlaybackCache {
  * to a plain network read, never to a failed playback.
  */
 @OptIn(UnstableApi::class)
-fun cachingDataSourceFactory(context: Context, api: ApiClient): DataSource.Factory {
+fun cachingDataSourceFactory(context: Context, api: ApiClient): DataSource.Factory =
+    // Downloads first, and read-only. A title kept for offline is checked
+    // before anything touches the network, which is what makes a downloaded
+    // film play with the box disconnected — and what makes a partly
+    // downloaded one play the part it has from disk while fetching the rest.
+    downloadCacheReader(context, streamingDataSourceFactory(context, api))
+
+/** The read-through cache used for everything that was not downloaded. */
+@OptIn(UnstableApi::class)
+private fun streamingDataSourceFactory(context: Context, api: ApiClient): DataSource.Factory {
     val http = DefaultHttpDataSource.Factory()
         .setDefaultRequestProperties(api.authHeaders())
         .setConnectTimeoutMs(HTTP_CONNECT_TIMEOUT_MS)

@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -136,4 +137,22 @@ private fun constantTimeEquals(a: String, b: String): Boolean {
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
-data class Credentials(val serverUrl: String, val deviceKey: String)
+data class Credentials(val serverUrl: String, val deviceKey: String) {
+    companion object {
+        /**
+         * Reads saved credentials on the calling thread.
+         *
+         * For the download service, which the system may construct after a
+         * reboot with no activity around to hand it anything. Everything else
+         * observes the flow above; this exists because a DataSource factory
+         * has to produce headers synchronously and there is nothing to
+         * suspend into.
+         *
+         * A build with the server baked in never reaches this — see
+         * MainActivity, which publishes those credentials at launch.
+         */
+        fun loadBlocking(context: Context): Credentials? = runCatching {
+            runBlocking(Dispatchers.IO) { Prefs(context.applicationContext).credentials.first() }
+        }.getOrNull()
+    }
+}

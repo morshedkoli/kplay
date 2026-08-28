@@ -1,6 +1,12 @@
 package com.kdrive.tv.ui
 
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.offline.Download
+import androidx.media3.exoplayer.offline.DownloadProgress
+import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -15,6 +21,7 @@ import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.Credentials
+import com.kdrive.tv.data.DownloadMeta
 import com.kdrive.tv.data.Episode
 import com.kdrive.tv.data.MediaDetail
 import com.kdrive.tv.data.MediaItem
@@ -174,6 +181,86 @@ class ScreenshotTest {
         }
         rule.onRoot().captureRoboImage(
             filePath = "build/outputs/roborazzi/browse-watching.png",
+            roborazziOptions = RoborazziOptions(),
+        )
+    }
+
+    /**
+     * A download in whatever state, built by hand.
+     *
+     * Media3 has no test double for this, and the shelf's whole job is to
+     * distinguish the states — a completed download from one at 6% that will
+     * run out the moment the network does.
+     */
+    @OptIn(UnstableApi::class)
+    private fun download(
+        id: String,
+        title: String,
+        state: Int,
+        percent: Float,
+        subtitle: String? = null,
+    ): Download {
+        val progress = DownloadProgress().apply {
+            percentDownloaded = percent
+            bytesDownloaded = (percent * 10_000_000).toLong()
+        }
+        return Download(
+            DownloadRequest.Builder(id, Uri.parse("https://example.invalid/$id"))
+                .setData(
+                    DownloadMeta(
+                        title = title,
+                        subtitle = subtitle,
+                        posterPath = "/poster$id.jpg",
+                        backdropPath = "/backdrop$id.jpg",
+                    ).encode()
+                )
+                .build(),
+            state,
+            /* startTimeMs = */ 0L,
+            /* updateTimeMs = */ 0L,
+            /* contentLength = */ 1_000_000_000L,
+            /* stopReason = */ 0,
+            /* failureReason = */ 0,
+            progress,
+        )
+    }
+
+    /**
+     * The Downloads shelf.
+     *
+     * Three states side by side, because they are only meaningful against
+     * each other: finished, past the point where it can be watched, and not
+     * yet there.
+     */
+    @OptIn(UnstableApi::class)
+    @Test
+    fun `browse with downloads`() {
+        val loader = fakeImages()
+        rule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                BrowseContent(
+                    movies = listOf(movie("1", "Inception", 2010)),
+                    series = listOf(series("8", "My Brilliant Career", 2)),
+                    downloads = listOf(
+                        download("d1", "Arrival", Download.STATE_COMPLETED, 100f),
+                        download(
+                            "d2",
+                            "My Brilliant Career",
+                            Download.STATE_DOWNLOADING,
+                            42f,
+                            subtitle = "S01E02",
+                        ),
+                        download("d3", "Heat", Download.STATE_DOWNLOADING, 6f),
+                    ),
+                    api = api,
+                    imageLoader = loader,
+                    onSelect = {},
+                    onSync = {},
+                )
+            }
+        }
+        rule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/browse-downloads.png",
             roborazziOptions = RoborazziOptions(),
         )
     }

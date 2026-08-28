@@ -3,6 +3,17 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Downloads keep running while the viewer is elsewhere in the system,
+         which on modern Android means a foreground service and, from 33, the
+         viewer's permission to show its notification. RECEIVE_BOOT_COMPLETED
+         is what lets an interrupted download resume after the television is
+         switched back on. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Not a touchscreen-required app — this is exactly what makes it
          installable/launchable on Android TV. -->
     <uses-feature
@@ -38,5 +49,18 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Not exported: nothing outside the app has any business starting a
+             download. Media3 talks to it through explicit intents from within
+             the process, which needs no export. -->
+        <service
+            android:name=".KDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync">
+            <intent-filter>
+                <action android:name="androidx.media3.exoplayer.downloadService.action.RESTART" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

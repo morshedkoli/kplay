@@ -20,6 +20,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
@@ -38,8 +40,14 @@ import coil.compose.AsyncImage
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.ApiError
 import com.kdrive.tv.data.Episode
+import androidx.media3.exoplayer.offline.Download
+import com.kdrive.tv.data.DownloadMeta
+import com.kdrive.tv.data.Downloads
 import com.kdrive.tv.data.MediaDetail
+import com.kdrive.tv.data.playableOffline
 import com.kdrive.tv.ui.components.ActionButton
+import com.kdrive.tv.ui.components.DownloadButton
+import com.kdrive.tv.ui.components.DownloadChip
 import com.kdrive.tv.ui.components.FocusBox
 import com.kdrive.tv.ui.theme.K
 
@@ -80,6 +88,14 @@ fun DetailScreen(
     // the way back, so a viewer who finishes episode 7 is standing on episode
     // 7 rather than at the top of the list.
     var lastPlayedId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Every download on the device, keyed by the id it was requested under.
+    // The whole set rather than this title's: it is a handful of rows, and a
+    // series needs one lookup per episode anyway.
+    val context = LocalContext.current
+    val downloads by remember { Downloads.flow(context) }
+        .collectAsState(initial = emptyList())
+    val downloadsById = remember(downloads) { downloads.associateBy { it.request.id } }
 
     // Without an explicit claim nothing on this screen holds focus, and a
     // screen with no focus ignores the remote completely.
@@ -137,6 +153,27 @@ fun DetailScreen(
                     lastPlayedId = id
                     onPlay(id, label)
                 },
+                downloads = downloadsById,
+                // The same URL playback streams from, so the downloaded bytes
+                // land in the cache under the key the player looks them up by.
+                // The label goes with it, because the Downloads screen has to
+                // render with no server to ask.
+                onDownload = { id ->
+                    val loaded = detail!!
+                    val episode = loaded.episodes.firstOrNull { it.id == id }
+                    Downloads.start(
+                        context = context,
+                        id = id,
+                        streamUrl = api.streamUrl(id),
+                        meta = DownloadMeta(
+                            title = loaded.title,
+                            subtitle = episode?.label,
+                            posterPath = loaded.posterPath,
+                            backdropPath = loaded.backdropPath,
+                        ),
+                    )
+                },
+                onRemoveDownload = { id -> Downloads.remove(context, id) },
                 season = season,
                 onSeason = { season = it },
                 firstAction = firstAction,
@@ -156,6 +193,11 @@ internal fun DetailContent(
     api: ApiClient,
     imageLoader: ImageLoader,
     onPlay: (id: String, title: String) -> Unit,
+    /** Downloads by the id they were requested under — the same id that
+     * streams, so a row can look itself up without a mapping. */
+    downloads: Map<String, Download> = emptyMap(),
+    onDownload: (id: String) -> Unit = {},
+    onRemoveDownload: (id: String) -> Unit = {},
     season: Int? = item.seasons().firstOrNull()?.first,
     onSeason: (Int) -> Unit = {},
     firstAction: FocusRequester? = null,
@@ -212,14 +254,47 @@ internal fun DetailContent(
 
                         if (!item.isSeries) {
                             val playable = item.status != "processing" && item.driveFileId != null
-                            ActionButton(
-                                label = if (playable) "Play" else "Not available",
-                                enabled = playable,
-                                onClick = { onPlay(item.id, item.title) },
-                                leading = { PlayGlyph() },
-                                focusRequester = firstAction,
+                            val download = downloads[item.id]
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(top = 6.dp),
-                            )
+                            ) {
+                                ActionButton(
+                                    // Named for what it will actually do. A
+                                    // film already on the device plays with
+                                    // the network unplugged, and saying so is
+                                    // the entire reason someone downloaded it.
+                                    label = when {
+                                        !playable -> "Not available"
+                                        download?.playableOffline == true -> "Play offline"
+                                        else -> "Play"
+                                    },
+                                    enabled = playable,
+                                    onClick = { onPlay(item.id, item.title) },
+                                    leading = { PlayGlyph() },
+                                    focusRequester = firstAction,
+                                )
+                                if (playable) {
+                                    DownloadButton(
+                                        download = download,
+                                        onDownload = { onDownload(item.id) },
+                                        onRemove = { onRemoveDownload(item.id) },
+                                    )
+                                }
+                            }
+                            // Said once, plainly, at the moment it becomes
+                            // true. "10%" on its own means nothing; "enough to
+                            // start watching" is the fact behind the number.
+                            if (download != null && download.state != Download.STATE_COMPLETED &&
+                                download.playableOffline
+                            ) {
+                                Text(
+                                    "Enough downloaded to start watching — the rest arrives while you watch.",
+                                    style = K.Eyebrow,
+                                    color = K.TextMuted,
+                                )
+                            }
                         }
                     }
 
@@ -270,12 +345,15 @@ internal fun DetailContent(
                                 shown.second.forEachIndexed { index, episode ->
                                     EpisodeRow(
                                         episode = episode,
+                                        download = downloads[episode.id],
                                         onPlay = {
                                             onPlay(
                                                 episode.id,
                                                 "${item.title}  ·  ${episode.label}",
                                             )
                                         },
+                                        onDownload = { onDownload(episode.id) },
+                                        onRemoveDownload = { onRemoveDownload(episode.id) },
                                         // With no Play button above, the first
                                         // episode is the screen's entry point
                                         // — unless we are coming back from
@@ -370,15 +448,26 @@ private fun EpisodeRow(
     onPlay: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
+    download: Download? = null,
+    onDownload: () -> Unit = {},
+    onRemoveDownload: () -> Unit = {},
 ) {
     val playable = episode.driveFileId != null
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
 
     FocusBox(
         onClick = onPlay,
         enabled = playable,
         cornerRadius = 5,
         focusRequester = focusRequester,
-        modifier = modifier.fillMaxWidth(),
+        // weight, not fillMaxWidth: the download chip sits beside it and
+        // needs its own share of the row rather than being pushed off the end.
+        modifier = Modifier.weight(1f),
     ) { focused ->
         Row(
             Modifier
@@ -422,9 +511,24 @@ private fun EpisodeRow(
                         .background(K.Accent)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 ) {
-                    Text("PLAY", style = K.Eyebrow, color = K.TextPrimary)
+                    Text(
+                        if (download?.playableOffline == true) "PLAY OFFLINE" else "PLAY",
+                        style = K.Eyebrow,
+                        color = K.TextPrimary,
+                    )
                 }
             }
+        }
+    }
+
+        // Its own focus stop to the right of the row, so the D-pad reaches it
+        // without the row having to become a menu.
+        if (playable) {
+            DownloadChip(
+                download = download,
+                onDownload = onDownload,
+                onRemove = onRemoveDownload,
+            )
         }
     }
 }

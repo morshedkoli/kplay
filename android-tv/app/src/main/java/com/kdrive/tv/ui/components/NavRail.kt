@@ -57,6 +57,10 @@ enum class Section(val label: String, val icon: ImageVector) {
     Movies("Movies", Icons.Filled.PlayArrow),
     Series("Series", Icons.Filled.List),
 
+    // The one section that works with no server at all, so it sits below the
+    // three that need one.
+    Downloads("Downloads", KIcons.DownloadDone),
+
     // An entry that navigates away rather than filtering the rows below it.
     // HomeScreen treats it as an action, so it never becomes the selected
     // section and the rail never sits on a state the content cannot show.

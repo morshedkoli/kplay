@@ -22,6 +22,17 @@ object KIcons {
      * happens to use. */
     val Pause: ImageVector by lazy { icon("Pause", "M6 19h4V5H6v14zm8-14v14h4V5h-4z") }
 
+    /** Arrow into a tray: keep this on the device. */
+    val Download: ImageVector by lazy {
+        icon("Download", "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z")
+    }
+
+    /** The same tray with a tick — it is here, and it will play with the
+     * television unplugged from the world. */
+    val DownloadDone: ImageVector by lazy {
+        icon("DownloadDone", "M18 15v3H6v-3H4v3c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-3h-2zM17 11l-1.41-1.41L13 12.17V4h-2v8.17L8.41 9.59 7 11l5 5 5-5z")
+    }
+
     /** A speaker with waves — the mark for the soundtrack list. */
     val Audio: ImageVector by lazy {
         icon(

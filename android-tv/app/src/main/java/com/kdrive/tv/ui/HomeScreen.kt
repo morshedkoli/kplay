@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
@@ -40,8 +42,12 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.MediaItem
+import androidx.media3.exoplayer.offline.Download
+import com.kdrive.tv.data.Downloads
+import com.kdrive.tv.data.meta
 import com.kdrive.tv.data.WatchingItem
 import com.kdrive.tv.ui.components.CarouselRow
+import com.kdrive.tv.ui.components.DownloadsRow
 import com.kdrive.tv.ui.components.NavRail
 import com.kdrive.tv.ui.components.Section
 import com.kdrive.tv.ui.components.WatchingRow
@@ -67,8 +73,12 @@ fun HomeScreen(
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
     onResume: (WatchingItem) -> Unit = {},
+    onPlayDownload: (Download) -> Unit = {},
     onOpenSettings: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val downloads by remember { Downloads.flow(context) }
+        .collectAsState(initial = emptyList())
     var movies by remember { mutableStateOf<List<MediaItem>?>(null) }
     var series by remember { mutableStateOf<List<MediaItem>?>(null) }
     var watching by remember { mutableStateOf<List<WatchingItem>>(emptyList()) }
@@ -144,7 +154,24 @@ fun HomeScreen(
     }
 
     when {
-        error != null -> Framed { Message("Can't reach your library", error!!) }
+        // A server that cannot be reached is not the end of the screen when
+        // there are downloads: those play with no server at all, and showing
+        // an error page over the top of them would hide the one thing that
+        // still works.
+        error != null && downloads.isEmpty() ->
+            Framed { Message("Can't reach your library", error!!) }
+
+        error != null -> BrowseContent(
+            movies = emptyList(),
+            series = emptyList(),
+            downloads = downloads,
+            offline = true,
+            api = api,
+            imageLoader = imageLoader,
+            onSelect = onSelect,
+            onPlayDownload = onPlayDownload,
+            onOpenSettings = onOpenSettings,
+        )
 
         movies == null || series == null -> Framed {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -156,10 +183,12 @@ fun HomeScreen(
             movies = movies!!,
             series = series!!,
             watching = watching,
+            downloads = downloads,
             api = api,
             imageLoader = imageLoader,
             onSelect = onSelect,
             onResume = onResume,
+            onPlayDownload = onPlayDownload,
             onOpenSettings = onOpenSettings,
             syncing = syncing,
             syncStatus = syncStatus,
@@ -180,10 +209,16 @@ internal fun BrowseContent(
     movies: List<MediaItem>,
     series: List<MediaItem>,
     watching: List<WatchingItem> = emptyList(),
+    downloads: List<Download> = emptyList(),
+    /** True when the library could not be fetched and only what is on the
+     * device can be shown. The rail and the empty states both change wording
+     * rather than pretending the server is simply empty. */
+    offline: Boolean = false,
     api: ApiClient,
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
     onResume: (WatchingItem) -> Unit = {},
+    onPlayDownload: (Download) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     syncing: Boolean = false,
     syncStatus: String? = null,
@@ -191,7 +226,9 @@ internal fun BrowseContent(
     // have no server to sync against.
     onSync: (() -> Unit)? = null,
 ) {
-    var section by remember { mutableStateOf(Section.Home) }
+    // Offline opens on Downloads, because it is the only section with
+    // anything in it — landing on an empty Home would read as a broken app.
+    var section by remember { mutableStateOf(if (offline) Section.Downloads else Section.Home) }
     // The hero shows whatever holds focus, and focus can be on a poster or on
     // a Watching card — two different shapes. Both are flattened to the four
     // things the hero actually draws, so it never has to know which.
@@ -208,8 +245,10 @@ internal fun BrowseContent(
     val firstCard = remember { FocusRequester() }
     var focusClaimed by remember { mutableStateOf(false) }
 
-    LaunchedEffect(movies, series, watching) {
-        if (!focusClaimed && (movies.isNotEmpty() || series.isNotEmpty() || watching.isNotEmpty())) {
+    LaunchedEffect(movies, series, watching, downloads) {
+        val anything = movies.isNotEmpty() || series.isNotEmpty() ||
+            watching.isNotEmpty() || downloads.isNotEmpty()
+        if (!focusClaimed && anything) {
             focusClaimed = true
             // Guarded: requestFocus throws if the node isn't attached yet, and
             // a race here would take the whole screen down.
@@ -235,10 +274,19 @@ internal fun BrowseContent(
         )
 
         Box(Modifier.fillMaxSize()) {
-            if (movies.isEmpty() && series.isEmpty()) {
+            if (movies.isEmpty() && series.isEmpty() && downloads.isEmpty()) {
                 Message(
-                    "Nothing here yet",
-                    "Drop video files into your Drive folder, then press Sync in the menu on the left.",
+                    if (offline) "Can't reach your library" else "Nothing here yet",
+                    if (offline) {
+                        "Nothing is downloaded to this device either, so there is nothing to play until the server is back."
+                    } else {
+                        "Drop video files into your Drive folder, then press Sync in the menu on the left."
+                    },
+                )
+            } else if (section == Section.Downloads && downloads.isEmpty()) {
+                Message(
+                    "Nothing downloaded",
+                    "Open a film or an episode and press Download. It plays here with no network at all.",
                 )
             } else if (section == Section.Watching && watching.isEmpty()) {
                 // Its own state rather than an empty page: the section exists
@@ -270,13 +318,32 @@ internal fun BrowseContent(
                     val showWatching =
                         (section == Section.Home || section == Section.Watching) &&
                             watching.isNotEmpty()
-                    val onlyWatching = section == Section.Watching
-                    val showMovies = !onlyWatching && section != Section.Series && movies.isNotEmpty()
-                    val showSeries = !onlyWatching && section != Section.Movies && series.isNotEmpty()
+                    // Downloads lead on Home when the server is unreachable —
+                    // they are then the only thing that can be played at all.
+                    val showDownloads =
+                        (section == Section.Home || section == Section.Downloads) &&
+                            downloads.isNotEmpty()
+                    val narrowed = section == Section.Watching || section == Section.Downloads
+                    val showMovies = !narrowed && section != Section.Series && movies.isNotEmpty()
+                    val showSeries = !narrowed && section != Section.Movies && series.isNotEmpty()
+                    val downloadsFirst = offline || section == Section.Downloads
 
                     // Exactly one row may claim the initial focus, and it has
                     // to be the topmost one actually rendered — otherwise the
                     // page opens scrolled to a row that is not at the top.
+                    // Exactly one row claims the initial focus, and it must be
+                    // whichever is drawn first.
+                    if (showDownloads && downloadsFirst) {
+                        DownloadsRow(
+                            title = "Downloaded",
+                            downloads = downloads,
+                            api = api,
+                            imageLoader = imageLoader,
+                            onPlay = onPlayDownload,
+                            onFocusItem = { spotlight = Spotlight.of(it) },
+                            firstItemFocusRequester = firstCard,
+                        )
+                    }
                     if (showWatching) {
                         WatchingRow(
                             title = "Continue watching",
@@ -285,9 +352,22 @@ internal fun BrowseContent(
                             imageLoader = imageLoader,
                             onResume = onResume,
                             onFocusItem = { spotlight = Spotlight.of(it) },
-                            firstItemFocusRequester = firstCard,
+                            firstItemFocusRequester =
+                                if (showDownloads && downloadsFirst) null else firstCard,
                         )
                     }
+                    if (showDownloads && !downloadsFirst) {
+                        DownloadsRow(
+                            title = "Downloaded",
+                            downloads = downloads,
+                            api = api,
+                            imageLoader = imageLoader,
+                            onPlay = onPlayDownload,
+                            onFocusItem = { spotlight = Spotlight.of(it) },
+                            firstItemFocusRequester = if (showWatching) null else firstCard,
+                        )
+                    }
+                    val topClaimed = showWatching || showDownloads
                     if (showMovies) {
                         CarouselRow(
                             title = "Movies",
@@ -296,7 +376,7 @@ internal fun BrowseContent(
                             imageLoader = imageLoader,
                             onSelect = onSelect,
                             onFocusItem = { spotlight = Spotlight.of(it) },
-                            firstItemFocusRequester = if (showWatching) null else firstCard,
+                            firstItemFocusRequester = if (topClaimed) null else firstCard,
                         )
                     }
                     if (showSeries) {
@@ -308,7 +388,7 @@ internal fun BrowseContent(
                             onSelect = onSelect,
                             onFocusItem = { spotlight = Spotlight.of(it) },
                             firstItemFocusRequester =
-                                if (showWatching || showMovies) null else firstCard,
+                                if (topClaimed || showMovies) null else firstCard,
                         )
                     }
                     Spacer(Modifier.height(40.dp))
@@ -433,6 +513,28 @@ internal data class Spotlight(
                 description = item.description,
                 backdropPath = item.backdropPath,
                 posterPath = item.posterPath,
+            )
+        }
+
+        /** "OFFLINE · S01E04 · 100% DOWNLOADED" — a downloaded item knows only
+         * what was saved with it, which is exactly the four things the hero
+         * draws, plus how much of it is actually here. */
+        @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+        fun of(download: Download): Spotlight {
+            val meta = download.meta
+            val parts = mutableListOf("OFFLINE")
+            meta.subtitle?.takeIf { it.isNotBlank() }?.let { parts += it }
+            parts += if (download.state == Download.STATE_COMPLETED) {
+                "ON THIS DEVICE"
+            } else {
+                "${download.percentDownloaded.toInt()}% DOWNLOADED"
+            }
+            return Spotlight(
+                title = meta.title,
+                meta = parts.joinToString("  ·  "),
+                description = null,
+                backdropPath = meta.backdropPath,
+                posterPath = meta.posterPath,
             )
         }
 

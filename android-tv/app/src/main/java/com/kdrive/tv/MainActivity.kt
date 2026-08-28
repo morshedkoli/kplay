@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.Credentials
+import com.kdrive.tv.data.Downloads
+import com.kdrive.tv.data.meta
 import com.kdrive.tv.data.Prefs
 import com.kdrive.tv.data.authenticatedImageLoader
 import com.kdrive.tv.ui.DetailScreen
@@ -196,6 +199,12 @@ private fun AppNav(credentials: Credentials, prefs: Prefs) {
     val imageLoader = remember(credentials) { authenticatedImageLoader(context, credentials) }
     val navController = rememberNavController()
 
+    // The download service is built by the system, with no activity to hand
+    // it anything, so the key it needs is published here the moment it is
+    // known. Without this a download started right after a cold launch would
+    // go out unauthenticated and come back 401.
+    LaunchedEffect(credentials) { Downloads.credentials = credentials }
+
     NavHost(navController = navController, startDestination = "browse") {
         composable("browse") {
             HomeScreen(
@@ -212,6 +221,17 @@ private fun AppNav(credentials: Credentials, prefs: Prefs) {
                 onResume = { item ->
                     navController.navigate(
                         "player/${item.id}?title=${Uri.encode(item.playerTitle())}"
+                    )
+                },
+                // A downloaded card plays straight away, like a resume does.
+                // The id it was saved under is the id that streams, so the
+                // player finds the bytes on disk without being told they are
+                // there.
+                onPlayDownload = { download ->
+                    val meta = download.meta
+                    val label = listOfNotNull(meta.title, meta.subtitle).joinToString("  ·  ")
+                    navController.navigate(
+                        "player/${download.request.id}?title=${Uri.encode(label)}"
                     )
                 },
                 onOpenSettings = { navController.navigate("settings") },
