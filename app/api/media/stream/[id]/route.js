@@ -16,7 +16,7 @@
 // `X-Content-Type-Options: nosniff` and no `Access-Control-Allow-Origin`, so
 // a browser <video> refuses them both with and without `crossorigin`.
 
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 
 import { ObjectId } from 'mongodb';
 
@@ -38,6 +38,24 @@ export const dynamic = 'force-dynamic';
 // open-ended range to run to the end of the file; a truncated range may end
 // its playback early. Browsers are unaffected either way.
 const MAX_CHUNK_BYTES = Number(process.env.STREAM_MAX_CHUNK_BYTES || 0);
+
+/**
+ * How far ahead of the player this server is allowed to get.
+ *
+ * Piping Drive's stream straight into the response makes the whole chain
+ * lock-step: backpressure from the client reaches all the way back to Google,
+ * so the moment the player stops draining — and a player with a full buffer
+ * stops constantly — the Drive connection stops too, and has to spin back up
+ * afterwards. It never gets ahead, so every wobble on the Drive side becomes
+ * a wobble at the television.
+ *
+ * A buffer in between decouples the two: the server keeps pulling from Drive
+ * while the client is idle, and has bytes in hand the moment it asks again.
+ * 16 MB is a second or two of a high-bitrate film — enough to absorb Drive's
+ * jitter, small enough that a handful of concurrent streams is nothing to a
+ * VPS.
+ */
+const READ_AHEAD_BYTES = 16 * 1024 * 1024;
 
 // How long a client may reuse a range it already downloaded. A day is long
 // enough to make a re-watch or a scrub free and short enough that a replaced
@@ -150,10 +168,24 @@ export async function GET(request, { params }) {
     return Response.json({ error: 'Storage read failed' }, { status: 502 });
   }
 
+  // Read ahead of the client rather than in lock-step with it (see
+  // READ_AHEAD_BYTES). The pipe is torn down in both directions on failure so
+  // a dead Drive socket cannot leave a half-open response hanging.
+  const readAhead = new PassThrough({ highWaterMark: READ_AHEAD_BYTES });
+  result.stream.on('error', (err) => readAhead.destroy(err));
+  result.stream.pipe(readAhead);
+
   // A seek or a closed tab aborts the request mid-download. Without this the
   // Drive-side socket stays open until it times out, and a night of scrubbing
   // leaks a connection per seek.
-  request.signal?.addEventListener('abort', () => result.stream.destroy(), { once: true });
+  request.signal?.addEventListener(
+    'abort',
+    () => {
+      result.stream.destroy();
+      readAhead.destroy();
+    },
+    { once: true }
+  );
 
   // result.stream is a Node Readable (googleapis responseType: 'stream').
   // Response wants a web ReadableStream; converting explicitly keeps
@@ -185,7 +217,7 @@ export async function GET(request, { params }) {
   };
   if (isPartial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${meta.size}`;
 
-  return new Response(Readable.toWeb(result.stream), {
+  return new Response(Readable.toWeb(readAhead), {
     status: isPartial ? 206 : 200,
     headers,
   });

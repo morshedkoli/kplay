@@ -19,7 +19,14 @@ class ApiError(message: String, val httpStatus: Int? = null) : Exception(message
 private data class ProgressResponse(val positionSeconds: Double = 0.0)
 
 @Serializable
-private data class ProgressRequest(val id: String, val positionSeconds: Double)
+private data class ProgressRequest(
+    val id: String,
+    val positionSeconds: Double,
+    // Omitted rather than sent as zero when the player does not yet know it:
+    // the server treats a stored duration as the truth about whether a title
+    // is finished, so a wrong one is worse than none at all.
+    val durationSeconds: Double? = null,
+)
 
 /**
  * The server's time-to-byte table for a file the extractor cannot seek in.
@@ -107,6 +114,25 @@ class ApiClient(private val credentials: Credentials) {
         return json.decodeFromString(MediaListResponse.serializer(), getText("/api/media/list"))
     }
 
+    /**
+     * Everything part-watched, most recent first — what the Watching section
+     * shows.
+     *
+     * A failure comes back as an empty list rather than an exception. This is
+     * one extra shelf on a screen that already has the library on it, and
+     * losing the shelf must never cost the user the rest of the page.
+     */
+    suspend fun listWatching(): List<WatchingItem> {
+        return try {
+            json.decodeFromString(
+                WatchingResponse.serializer(),
+                getText("/api/media/watching"),
+            ).items
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     /** One item with its episodes — the episode list is empty for a movie. */
     suspend fun getMedia(id: String): MediaDetail {
         return json.decodeFromString(MediaDetail.serializer(), getText("/api/media/$id"))
@@ -147,11 +173,15 @@ class ApiClient(private val credentials: Credentials) {
     }
 
     /** Fire-and-forget position save — mirrors the web player's periodic POST. */
-    suspend fun postProgress(id: String, positionSeconds: Double) = withContext(Dispatchers.IO) {
+    suspend fun postProgress(
+        id: String,
+        positionSeconds: Double,
+        durationSeconds: Double? = null,
+    ) = withContext(Dispatchers.IO) {
         try {
             val payload = json.encodeToString(
                 ProgressRequest.serializer(),
-                ProgressRequest(id, positionSeconds),
+                ProgressRequest(id, positionSeconds, durationSeconds),
             )
             val body = payload.toRequestBody("application/json".toMediaType())
             val req = Request.Builder()
@@ -171,11 +201,11 @@ class ApiClient(private val credentials: Credentials) {
      * fire this off as the user leaves. Enqueued on OkHttp's own dispatcher so
      * it neither blocks the keypress nor dies with the composition.
      */
-    fun postProgressAsync(id: String, positionSeconds: Double) {
+    fun postProgressAsync(id: String, positionSeconds: Double, durationSeconds: Double? = null) {
         try {
             val payload = json.encodeToString(
                 ProgressRequest.serializer(),
-                ProgressRequest(id, positionSeconds),
+                ProgressRequest(id, positionSeconds, durationSeconds),
             )
             val req = Request.Builder()
                 .url("${credentials.serverUrl}/api/media/progress")

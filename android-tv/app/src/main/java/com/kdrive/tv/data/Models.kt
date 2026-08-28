@@ -121,3 +121,87 @@ data class ScanEntry(
     val type: String? = null,
     val error: String? = null,
 )
+
+/**
+ * One part-watched thing, from GET /api/media/watching.
+ *
+ * `id` is what streams and what progress is keyed by — a media _id for a
+ * movie, an episode _id for an episode. `mediaId` is always the library item
+ * it belongs to, so the card can open the detail page for a series while
+ * still resuming the exact episode.
+ *
+ * `durationSeconds` is null for anything watched before the client began
+ * reporting a duration; a card with no duration shows no bar rather than a
+ * bar at a made-up position.
+ */
+@Serializable
+data class WatchingItem(
+    val id: String,
+    val type: String = "movie", // movie | episode
+    val mediaId: String,
+    val title: String,
+    val description: String? = null,
+    val year: Int? = null,
+    val posterPath: String? = null,
+    val backdropPath: String? = null,
+    val positionSeconds: Double = 0.0,
+    val durationSeconds: Double? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val episodeTitle: String? = null,
+) {
+    val isEpisode: Boolean get() = type == "episode"
+
+    /** "S01E02" for an episode, null for a movie. */
+    val episodeLabel: String?
+        get() = if (isEpisode && season != null && episode != null) {
+            "S%02dE%02d".format(season, episode)
+        } else {
+            null
+        }
+
+    /** 0f..1f, or null when the duration was never recorded. */
+    val progress: Float?
+        get() {
+            val total = durationSeconds ?: return null
+            if (total <= 0) return null
+            return (positionSeconds / total).coerceIn(0.0, 1.0).toFloat()
+        }
+
+    /** "42 min left" — the number that actually decides whether to press play
+     * tonight. Null without a duration, same as the bar. */
+    val remainingLabel: String?
+        get() {
+            val total = durationSeconds ?: return null
+            val left = (total - positionSeconds).toLong()
+            if (left <= 0) return null
+            val minutes = (left / 60).coerceAtLeast(1)
+            return if (minutes >= 60) {
+                val h = minutes / 60
+                val m = minutes % 60
+                if (m == 0L) "${h}h left" else "${h}h ${m}m left"
+            } else {
+                "$minutes min left"
+            }
+        }
+
+    /** What the player shows across the top — the same "Show  ·  S01E02"
+     * wording the detail screen hands it, so resuming from either place
+     * labels the playback identically. */
+    fun playerTitle(): String =
+        episodeLabel?.let { "$title  ·  $it" } ?: title
+
+    /** The line under the title: episode label for a series, year for a film,
+     * with the time remaining appended when it is known. */
+    fun subtitle(): String {
+        val parts = mutableListOf<String>()
+        episodeLabel?.let { parts += it }
+        if (!isEpisode && year != null) parts += year.toString()
+        remainingLabel?.let { parts += it }
+        return parts.joinToString("  ·  ")
+    }
+}
+
+/** GET /api/media/watching. */
+@Serializable
+data class WatchingResponse(val items: List<WatchingItem> = emptyList())

@@ -58,4 +58,10 @@ object K {
     val Gutter = 48.dp
     val PosterW = 132.dp
     val PosterH = 198.dp
+
+    /** The Watching shelf's landscape card. 16:9 to match the backdrop it
+     * shows, and wider than a poster because it also carries a title, a time
+     * remaining and a position bar. */
+    val WatchCardW = 268.dp
+    val WatchCardH = 151.dp
 }

@@ -50,6 +50,10 @@ import com.kdrive.tv.ui.theme.K
 
 enum class Section(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Filled.Home),
+
+    // Sits directly under Home because it is the entry most often wanted and
+    // the one nearest the top is the cheapest to reach on a remote.
+    Watching("Watching", KIcons.Watching),
     Movies("Movies", Icons.Filled.PlayArrow),
     Series("Series", Icons.Filled.List),
 

@@ -18,6 +18,7 @@ import com.kdrive.tv.data.Credentials
 import com.kdrive.tv.data.Episode
 import com.kdrive.tv.data.MediaDetail
 import com.kdrive.tv.data.MediaItem
+import com.kdrive.tv.data.WatchingItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
@@ -110,6 +111,72 @@ class ScreenshotTest {
     }
 
     private fun downTo(minutes: Int, seconds: Int) = (minutes * 60L + seconds) * 1000L
+
+    private fun watching(
+        id: String,
+        title: String,
+        position: Double,
+        duration: Double?,
+        season: Int? = null,
+        episode: Int? = null,
+    ) = WatchingItem(
+        id = id,
+        type = if (season != null) "episode" else "movie",
+        mediaId = "m-$id",
+        title = title,
+        description = "Picked up part-way through, which is the only thing this " +
+            "shelf is for.",
+        year = 2019,
+        posterPath = "/poster$id.jpg",
+        backdropPath = "/backdrop$id.jpg",
+        positionSeconds = position,
+        durationSeconds = duration,
+        season = season,
+        episode = episode,
+    )
+
+    /**
+     * The Watching shelf on the home screen: landscape cards, each with its
+     * own position bar, above the ordinary poster rows.
+     *
+     * The last entry deliberately has no duration — that is what every row
+     * written before the client started reporting one looks like, and the
+     * card has to stay the same height with an empty bar rather than
+     * collapsing and making the row ragged.
+     */
+    @Test
+    fun `browse with watching`() {
+        val loader = fakeImages()
+        rule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                BrowseContent(
+                    movies = listOf(movie("1", "Inception", 2010), movie("2", "Dune", 2021)),
+                    series = listOf(series("8", "My Brilliant Career", 2)),
+                    watching = listOf(
+                        watching("w1", "Arrival", position = 2_400.0, duration = 6_960.0),
+                        watching(
+                            "w2",
+                            "My Brilliant Career",
+                            position = 300.0,
+                            duration = 3_000.0,
+                            season = 1,
+                            episode = 2,
+                        ),
+                        watching("w3", "Heat", position = 900.0, duration = null),
+                    ),
+                    api = api,
+                    imageLoader = loader,
+                    onSelect = {},
+                    onResume = {},
+                    onSync = {},
+                )
+            }
+        }
+        rule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/browse-watching.png",
+            roborazziOptions = RoborazziOptions(),
+        )
+    }
 
     @Test
     fun browse() {

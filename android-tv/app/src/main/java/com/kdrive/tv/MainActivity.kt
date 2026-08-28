@@ -202,6 +202,18 @@ private fun AppNav(credentials: Credentials, prefs: Prefs) {
                 api = api,
                 imageLoader = imageLoader,
                 onSelect = { item -> navController.navigate("detail/${item.id}") },
+                // Resume skips the detail screen entirely and goes straight
+                // to the player. The whole point of the shelf is that the
+                // decision has already been made; `item.id` is the episode's
+                // own id for a series, so it resumes that episode and not the
+                // series' first one. The player reads the saved position from
+                // the same key, so no offset has to be carried through the
+                // navigation route.
+                onResume = { item ->
+                    navController.navigate(
+                        "player/${item.id}?title=${Uri.encode(item.playerTitle())}"
+                    )
+                },
                 onOpenSettings = { navController.navigate("settings") },
             )
         }

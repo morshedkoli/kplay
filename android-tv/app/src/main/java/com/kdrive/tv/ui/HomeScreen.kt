@@ -40,9 +40,11 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.MediaItem
+import com.kdrive.tv.data.WatchingItem
 import com.kdrive.tv.ui.components.CarouselRow
 import com.kdrive.tv.ui.components.NavRail
 import com.kdrive.tv.ui.components.Section
+import com.kdrive.tv.ui.components.WatchingRow
 import com.kdrive.tv.ui.theme.K
 import kotlinx.coroutines.launch
 
@@ -64,10 +66,12 @@ fun HomeScreen(
     api: ApiClient,
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
+    onResume: (WatchingItem) -> Unit = {},
     onOpenSettings: () -> Unit = {},
 ) {
     var movies by remember { mutableStateOf<List<MediaItem>?>(null) }
     var series by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var watching by remember { mutableStateOf<List<WatchingItem>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
     var syncStatus by remember { mutableStateOf<String?>(null) }
@@ -82,7 +86,18 @@ fun HomeScreen(
         } catch (e: Exception) {
             error = e.message ?: "Couldn't reach the server"
         }
+        // After the library, and never allowed to fail the screen: listWatching
+        // swallows its own errors, so a server without the endpoint yet simply
+        // shows no shelf instead of an error page over a working library.
+        watching = api.listWatching()
     }
+
+    // Coming back from the player re-enters this composable without the
+    // activity ever having stopped, so the lifecycle observer below never
+    // fires for it. Without a load here the Watching shelf would still show
+    // the position the viewer had before they pressed play — the one place
+    // the shelf being stale is guaranteed to be noticed.
+    LaunchedEffect(Unit) { load() }
 
     // Load on entry, and again whenever the app comes back to the foreground.
     //
@@ -140,9 +155,11 @@ fun HomeScreen(
         else -> BrowseContent(
             movies = movies!!,
             series = series!!,
+            watching = watching,
             api = api,
             imageLoader = imageLoader,
             onSelect = onSelect,
+            onResume = onResume,
             onOpenSettings = onOpenSettings,
             syncing = syncing,
             syncStatus = syncStatus,
@@ -162,9 +179,11 @@ fun HomeScreen(
 internal fun BrowseContent(
     movies: List<MediaItem>,
     series: List<MediaItem>,
+    watching: List<WatchingItem> = emptyList(),
     api: ApiClient,
     imageLoader: ImageLoader,
     onSelect: (MediaItem) -> Unit,
+    onResume: (WatchingItem) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     syncing: Boolean = false,
     syncStatus: String? = null,
@@ -173,8 +192,14 @@ internal fun BrowseContent(
     onSync: (() -> Unit)? = null,
 ) {
     var section by remember { mutableStateOf(Section.Home) }
+    // The hero shows whatever holds focus, and focus can be on a poster or on
+    // a Watching card — two different shapes. Both are flattened to the four
+    // things the hero actually draws, so it never has to know which.
     var spotlight by remember {
-        mutableStateOf(movies.firstOrNull() ?: series.firstOrNull())
+        mutableStateOf(
+            watching.firstOrNull()?.let { Spotlight.of(it) }
+                ?: (movies.firstOrNull() ?: series.firstOrNull())?.let { Spotlight.of(it) }
+        )
     }
 
     // Something must hold focus or the remote does nothing at all: Android
@@ -183,8 +208,8 @@ internal fun BrowseContent(
     val firstCard = remember { FocusRequester() }
     var focusClaimed by remember { mutableStateOf(false) }
 
-    LaunchedEffect(movies, series) {
-        if (!focusClaimed && (movies.isNotEmpty() || series.isNotEmpty())) {
+    LaunchedEffect(movies, series, watching) {
+        if (!focusClaimed && (movies.isNotEmpty() || series.isNotEmpty() || watching.isNotEmpty())) {
             focusClaimed = true
             // Guarded: requestFocus throws if the node isn't attached yet, and
             // a race here would take the whole screen down.
@@ -215,6 +240,14 @@ internal fun BrowseContent(
                     "Nothing here yet",
                     "Drop video files into your Drive folder, then press Sync in the menu on the left.",
                 )
+            } else if (section == Section.Watching && watching.isEmpty()) {
+                // Its own state rather than an empty page: the section exists
+                // in the rail whether or not anything is in it, and landing on
+                // a blank screen reads as a broken app.
+                Message(
+                    "Nothing in progress",
+                    "Start a film or an episode and it will wait for you here.",
+                )
             } else {
                 Hero(item = spotlight, api = api, imageLoader = imageLoader)
 
@@ -231,9 +264,30 @@ internal fun BrowseContent(
                     // scroll up over it, which is what gives depth.
                     Spacer(Modifier.height(252.dp))
 
-                    val showMovies = section != Section.Series && movies.isNotEmpty()
-                    val showSeries = section != Section.Movies && series.isNotEmpty()
+                    // Watching leads on Home, because something half-finished
+                    // is what the remote was most likely picked up for, and
+                    // it is the whole of the Watching section.
+                    val showWatching =
+                        (section == Section.Home || section == Section.Watching) &&
+                            watching.isNotEmpty()
+                    val onlyWatching = section == Section.Watching
+                    val showMovies = !onlyWatching && section != Section.Series && movies.isNotEmpty()
+                    val showSeries = !onlyWatching && section != Section.Movies && series.isNotEmpty()
 
+                    // Exactly one row may claim the initial focus, and it has
+                    // to be the topmost one actually rendered — otherwise the
+                    // page opens scrolled to a row that is not at the top.
+                    if (showWatching) {
+                        WatchingRow(
+                            title = "Continue watching",
+                            items = watching,
+                            api = api,
+                            imageLoader = imageLoader,
+                            onResume = onResume,
+                            onFocusItem = { spotlight = Spotlight.of(it) },
+                            firstItemFocusRequester = firstCard,
+                        )
+                    }
                     if (showMovies) {
                         CarouselRow(
                             title = "Movies",
@@ -241,8 +295,8 @@ internal fun BrowseContent(
                             api = api,
                             imageLoader = imageLoader,
                             onSelect = onSelect,
-                            onFocusItem = { spotlight = it },
-                            firstItemFocusRequester = firstCard,
+                            onFocusItem = { spotlight = Spotlight.of(it) },
+                            firstItemFocusRequester = if (showWatching) null else firstCard,
                         )
                     }
                     if (showSeries) {
@@ -252,10 +306,9 @@ internal fun BrowseContent(
                             api = api,
                             imageLoader = imageLoader,
                             onSelect = onSelect,
-                            onFocusItem = { spotlight = it },
-                            // Only when Movies isn't showing, so exactly one
-                            // card ever claims the initial focus.
-                            firstItemFocusRequester = if (showMovies) null else firstCard,
+                            onFocusItem = { spotlight = Spotlight.of(it) },
+                            firstItemFocusRequester =
+                                if (showWatching || showMovies) null else firstCard,
                         )
                     }
                     Spacer(Modifier.height(40.dp))
@@ -278,7 +331,7 @@ private fun Framed(content: @Composable () -> Unit) {
  * hard swap on every keypress reads as flicker.
  */
 @Composable
-private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
+private fun Hero(item: Spotlight?, api: ApiClient, imageLoader: ImageLoader) {
     Box(Modifier.fillMaxWidth().height(264.dp)) {
         Crossfade(targetState = item, animationSpec = tween(320), label = "heroArt") { current ->
             val art = current?.let { api.heroImageUrl(it.backdropPath, it.posterPath) }
@@ -331,7 +384,7 @@ private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(metaLine(item), style = K.Eyebrow, color = K.TextMuted)
+                Text(item.meta, style = K.Eyebrow, color = K.TextMuted)
                 if (!item.description.isNullOrBlank()) {
                     Text(
                         item.description,
@@ -346,17 +399,59 @@ private fun Hero(item: MediaItem?, api: ApiClient, imageLoader: ImageLoader) {
     }
 }
 
-/** "SERIES · 2 EPISODES" / "MOVIE · 2010" — uppercase, tracked, never a sentence. */
-private fun metaLine(item: MediaItem): String {
-    val parts = mutableListOf<String>()
-    parts += if (item.isSeries) "SERIES" else "MOVIE"
-    if (item.isSeries) {
-        parts += "${item.episodeCount} " + if (item.episodeCount == 1) "EPISODE" else "EPISODES"
-    } else if (item.year != null) {
-        parts += item.year.toString()
+/**
+ * What the hero draws, independent of which kind of card focus is sitting on.
+ *
+ * A library poster and a Watching card carry different fields — one knows an
+ * episode count, the other an episode number and a time remaining — but the
+ * hero only ever renders four things. Flattening here keeps that from turning
+ * into a branch inside the hero for every new card shape.
+ */
+internal data class Spotlight(
+    val title: String,
+    val meta: String,
+    val description: String?,
+    val backdropPath: String?,
+    val posterPath: String?,
+) {
+    companion object {
+        /** "SERIES · 2 EPISODES" / "MOVIE · 2010" — uppercase, tracked, never
+         * a sentence. */
+        fun of(item: MediaItem): Spotlight {
+            val parts = mutableListOf<String>()
+            parts += if (item.isSeries) "SERIES" else "MOVIE"
+            if (item.isSeries) {
+                parts += "${item.episodeCount} " +
+                    if (item.episodeCount == 1) "EPISODE" else "EPISODES"
+            } else if (item.year != null) {
+                parts += item.year.toString()
+            }
+            if (item.status == "unmatched") parts += "NO MATCH"
+            return Spotlight(
+                title = item.title,
+                meta = parts.joinToString("  ·  "),
+                description = item.description,
+                backdropPath = item.backdropPath,
+                posterPath = item.posterPath,
+            )
+        }
+
+        /** "RESUME · S01E04 · 22 MIN LEFT" — the same tracked micro-label, but
+         * saying what is actually useful about a part-watched title. */
+        fun of(item: WatchingItem): Spotlight {
+            val parts = mutableListOf("RESUME")
+            item.episodeLabel?.let { parts += it }
+            if (!item.isEpisode && item.year != null) parts += item.year.toString()
+            item.remainingLabel?.let { parts += it.uppercase() }
+            return Spotlight(
+                title = item.title,
+                meta = parts.joinToString("  ·  "),
+                description = item.description,
+                backdropPath = item.backdropPath,
+                posterPath = item.posterPath,
+            )
+        }
     }
-    if (item.status == "unmatched") parts += "NO MATCH"
-    return parts.joinToString("  ·  ")
 }
 
 @Composable

@@ -53,6 +53,24 @@ private const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 5_000
  * re-seeking the network. */
 private const val BACK_BUFFER_MS = 30_000
 
+/**
+ * How many bytes the buffer is allowed to hold.
+ *
+ * This is the setting that decides whether the durations above mean anything.
+ * DefaultLoadControl stops buffering at whichever limit it reaches first, and
+ * its default byte target is computed per track type — around 13 MB for
+ * video. These are direct-play originals, frequently 15-25 Mbit/s, so 13 MB
+ * is roughly six seconds: the player was buffering seconds, not minutes, and
+ * every dip in throughput between the VPS and the television became a stall.
+ *
+ * 192 MB is about 90 seconds of a 17 Mbit/s film and about ten minutes of a
+ * modest 2.5 Mbit/s one, and it is memory the player allocates only as it
+ * fills. Paired with prioritizeTimeOverSizeThresholds below, the duration
+ * targets become the real limit for ordinary bitrates and this becomes the
+ * backstop for extreme ones.
+ */
+private const val TARGET_BUFFER_BYTES = 192 * 1024 * 1024
+
 /** Disk budget for the read-through cache. Big enough to hold an episode or
  * most of a film, small enough to leave a TV box's storage alone. */
 private const val DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024
@@ -176,4 +194,11 @@ fun loadControl(): LoadControl =
             BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
         )
         .setBackBuffer(BACK_BUFFER_MS, /* retainBackBufferFromKeyframe = */ true)
+        .setTargetBufferBytes(TARGET_BUFFER_BYTES)
+        // Without this the byte target wins and the durations above are
+        // decoration. With it the player keeps buffering towards the minute
+        // targets and only falls back on the byte ceiling for a bitrate high
+        // enough to make those minutes unaffordable — which is the behaviour
+        // the durations were written for.
+        .setPrioritizeTimeOverSizeThresholds(true)
         .build()

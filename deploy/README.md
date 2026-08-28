@@ -136,10 +136,13 @@ firewall is permissive — do not change that binding to `0.0.0.0`.
 
 ## Notes on sizing
 
-- The stream route holds one Drive connection per active playback. Memory stays
-  flat (bytes are piped, never buffered) but each stream uses upstream
+- The stream route holds one Drive connection per active playback, and keeps up
+  to 16 MB of read-ahead per stream so the Drive side can run ahead of the
+  player instead of stalling every time the player's buffer fills. nginx keeps
+  a further 8 MB per stream for the same reason. Each stream also uses upstream
   bandwidth equal to the playback bitrate, so the VPS's network cap, not its
-  RAM, is the limit on concurrent viewers.
+  RAM, is the limit on concurrent viewers — a dozen simultaneous streams is
+  well under 300 MB of buffering.
 - Uploads are piped straight through with `proxy_request_buffering off`, so
   disk usage doesn't grow with upload size.
 - The image is ~85 MB of `node_modules`, most of it `googleapis`. If that ever

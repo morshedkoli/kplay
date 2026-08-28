@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -37,6 +40,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -47,21 +51,26 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.CueSeekMap
 import com.kdrive.tv.data.loadControl
 import com.kdrive.tv.data.mediaSourceFactory
 import com.kdrive.tv.data.renderersFactory
+import com.kdrive.tv.ui.components.KIcons
 import com.kdrive.tv.ui.theme.K
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -80,6 +89,26 @@ private const val SEEK_JUMP_MS = 30_000L
 /** Controls fade out after this long untouched, so they stop covering the
  * picture without the user having to dismiss them. */
 private const val CONTROLS_TIMEOUT_MS = 4_000L
+
+/**
+ * How many times a dropped stream is picked back up on its own before the
+ * viewer is shown an error.
+ *
+ * The bytes come from one long HTTP request, proxied through the server and
+ * out to Drive, and hosts cap request duration — so a connection dying part
+ * way through a film is routine rather than exceptional. Reconnecting is what
+ * the viewer would do by hand anyway; three attempts is enough to ride out a
+ * blip and few enough that a genuinely dead server still surfaces quickly.
+ */
+private const val MAX_STREAM_RETRIES = 3
+
+/** Multiplied by the attempt number, so the gap grows if the server needs a
+ * moment rather than hammering it three times in a second. */
+private const val RETRY_BACKOFF_MS = 1_200L
+
+/** How long a transient notice stays up. Long enough to read one line at
+ * three metres, short enough not to sit over the picture. */
+private const val NOTICE_TIMEOUT_MS = 5_000L
 
 /** How long the keys must be quiet before a wound-to position is committed.
  * Long enough to collect a burst of presses, short enough that a deliberate
@@ -186,6 +215,44 @@ internal fun seekTargetFor(
     return (from + deltaMs).coerceIn(0L, limit)
 }
 /**
+ * Whether the thing that failed was the soundtrack rather than the film.
+ *
+ * This is the single biggest cause of "that video just won't play": an MKV
+ * carrying DTS, TrueHD or E-AC-3 on a box whose decoder cannot take it. The
+ * video is perfectly playable, but a renderer failure is fatal to the whole
+ * playback, so the viewer sees an error screen for a file that could have
+ * played with sound off or on another one of its own tracks.
+ *
+ * Identified by the format the failing renderer was handed, not by the error
+ * code — the same decoder codes arise for video, where dropping the track
+ * would leave nothing to watch.
+ */
+internal fun isAudioRendererFailure(error: PlaybackException): Boolean {
+    val exo = error as? ExoPlaybackException ?: return false
+    if (exo.type != ExoPlaybackException.TYPE_RENDERER) return false
+    return MimeTypes.isAudio(exo.rendererFormat?.sampleMimeType)
+}
+
+/**
+ * Whether this is worth quietly trying again.
+ *
+ * Everything here is about the connection, not the file: the same request
+ * repeated a second later plausibly succeeds. A malformed container or a
+ * missing decoder is not on this list, because retrying those just replays
+ * the same failure with the viewer watching.
+ */
+internal fun isTransientFailure(error: PlaybackException): Boolean = when (error.errorCode) {
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+    PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+    PlaybackException.ERROR_CODE_TIMEOUT,
+    -> true
+
+    else -> false
+}
+
+/**
  * Turns a playback failure into something worth putting on a television.
  *
  * The distinction that matters to the viewer is whether the file can never
@@ -269,6 +336,27 @@ fun PlayerScreen(
         ExoPlayer.Builder(context, renderersFactory(context))
             .setLoadControl(loadControl())
             .build()
+            .apply {
+                // Seeks land on the nearest keyframe instead of decoding
+                // forward to an exact frame. On a file streamed over one HTTP
+                // connection, exact seeking means fetching and decoding
+                // everything between the previous keyframe and the target —
+                // seconds of black screen for a wind the viewer wanted to be
+                // instant. A keyframe is at most a second or two off, which
+                // nobody winding through a film can perceive.
+                setSeekParameters(SeekParameters.CLOSEST_SYNC)
+
+                // Take audio focus properly: without this the soundtrack
+                // keeps playing over anything else the television starts, and
+                // does not pause for a call or an alarm.
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build(),
+                    /* handleAudioFocus = */ true,
+                )
+            }
     }
 
     var controlsVisible by remember { mutableStateOf(true) }
@@ -291,6 +379,23 @@ fun PlayerScreen(
     // play" looked like from the sofa: no message, no retry, no clue.
     var failure by remember { mutableStateOf<String?>(null) }
     var audio by remember { mutableStateOf<List<AudioOption>>(emptyList()) }
+    // The failure the listener last reported, handed to the recovery effect
+    // below. Deliberately separate from `failure`, which is the message on
+    // screen: most failures are recoverable and should never get that far.
+    var pendingError by remember { mutableStateOf<PlaybackException?>(null) }
+    var streamRetries by remember { mutableIntStateOf(0) }
+    // True once a soundtrack this device cannot decode has been switched off
+    // to keep the picture alive. Nothing re-enables audio but the user
+    // choosing a track by hand.
+    var audioDisabled by remember { mutableStateOf(false) }
+    // One line, briefly, for things the viewer should know but must not be
+    // stopped by: a reconnection, a soundtrack that had to be dropped, a
+    // track the hardware refuses.
+    var notice by remember { mutableStateOf<String?>(null) }
+    // The automatic "pick a soundtrack that actually works" pass runs once per
+    // file. Without the latch a track the selector refuses to honour would
+    // have it firing on every track update, forever.
+    var autoAudioTried by remember { mutableStateOf(false) }
     // Null until the timeline arrives, then whether this file can be seeked
     // at all. A Matroska file with no Cues index reports false, and every
     // seek into it lands at zero.
@@ -332,6 +437,11 @@ fun PlayerScreen(
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_ENDED) controlsVisible = true
+                // Playing again means the last drop was survived, so the
+                // budget is for consecutive failures rather than for the
+                // whole film — a two-hour title over a flaky link may need
+                // reconnecting a dozen times and should get it.
+                if (state == Player.STATE_READY) streamRetries = 0
             }
 
 
@@ -352,15 +462,43 @@ fun PlayerScreen(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
-                audio = audioOptions(tracks)
-                val selected = audio.indexOfFirst { it.selected }
+                val options = audioOptions(tracks)
+                audio = options
+                val selected = options.indexOfFirst { it.selected }
                 if (selected >= 0) audioCursor = selected
+
+                // A file whose first soundtrack is DTS or TrueHD hands this
+                // device a track it cannot decode, and the result is either
+                // silence or a fatal renderer error — on a file that often
+                // also carries a perfectly ordinary AAC track further down
+                // the list. Moving to that track before playback settles is
+                // the difference between "no sound on this one" and it just
+                // working.
+                val playable = options.any { it.selected && it.supported }
+                if (!playable && !audioDisabled && !autoAudioTried) {
+                    val alternative = options.firstOrNull { it.supported }
+                    if (alternative != null) {
+                        autoAudioTried = true
+                        player.trackSelectionParameters =
+                            player.trackSelectionParameters.buildUpon()
+                                .setOverrideForType(
+                                    TrackSelectionOverride(
+                                        alternative.group.mediaTrackGroup,
+                                        alternative.indexInGroup,
+                                    ),
+                                )
+                                .build()
+                        notice = "Switched to ${alternative.label} — this device " +
+                            "cannot decode the file's first soundtrack."
+                    }
+                }
             }
 
+            // Handed on rather than shown. Most failures here are a dropped
+            // connection or a soundtrack this box cannot decode, and both are
+            // recoverable without the viewer doing anything.
             override fun onPlayerError(error: PlaybackException) {
-                failure = describe(error)
-                buffering = false
-                controlsVisible = true
+                pendingError = error
             }
         }
         player.addListener(listener)
@@ -391,7 +529,11 @@ fun PlayerScreen(
         )
         player.prepare()
         player.playWhenReady = true
-        focusRequester.requestFocus()
+        // Guarded: requestFocus throws if the node is not attached yet, and
+        // an exception here takes down the whole screen — a black player
+        // instead of a film, which is exactly what it looks like from the
+        // sofa when a title "won't play".
+        runCatching { focusRequester.requestFocus() }
     }
 
     // Resuming waits for the timeline, because resuming into an unseekable
@@ -409,6 +551,80 @@ fun PlayerScreen(
             false -> Unit // start from the beginning, the only place it can start
         }
         pendingResumeMs = null
+    }
+
+    /**
+     * What happens after a failure, before the viewer is told about one.
+     *
+     * Three outcomes, in order of how little they cost:
+     *
+     *  1. The soundtrack failed. Move to another one the device can decode,
+     *     or switch audio off entirely — the film keeps playing either way.
+     *     An error screen for a film whose picture is fine is the worst
+     *     answer available.
+     *  2. The connection dropped. Reconnect, up to a few times, backing off.
+     *     `prepare()` after an error keeps the position, so the picture
+     *     resumes where it stopped without a seek — which matters, because a
+     *     file with no seek index could not be wound back there.
+     *  3. Anything else, or a budget spent: say so, and offer retry.
+     */
+    LaunchedEffect(pendingError) {
+        val error = pendingError ?: return@LaunchedEffect
+        pendingError = null
+
+        if (isAudioRendererFailure(error)) {
+            val alternative = audio.firstOrNull { it.supported && !it.selected }
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .apply {
+                    if (alternative != null) {
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        setOverrideForType(
+                            TrackSelectionOverride(
+                                alternative.group.mediaTrackGroup,
+                                alternative.indexInGroup,
+                            ),
+                        )
+                    } else {
+                        // No soundtrack this box can play. Silence beats a
+                        // film that refuses to start, and the notice says
+                        // which of the two happened.
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    }
+                }
+                .build()
+            audioDisabled = alternative == null
+            notice = if (alternative != null) {
+                "Soundtrack failed — switched to ${alternative.label}."
+            } else {
+                "No soundtrack in this file can be decoded here. Playing without sound."
+            }
+            buffering = true
+            player.prepare()
+            player.play()
+            return@LaunchedEffect
+        }
+
+        if (isTransientFailure(error) && streamRetries < MAX_STREAM_RETRIES) {
+            streamRetries += 1
+            notice = "Lost the stream — reconnecting ($streamRetries of $MAX_STREAM_RETRIES)."
+            buffering = true
+            delay(RETRY_BACKOFF_MS * streamRetries)
+            player.prepare()
+            player.play()
+            return@LaunchedEffect
+        }
+
+        failure = describe(error)
+        buffering = false
+        controlsVisible = true
+    }
+
+    // Notices are transient by definition — nothing about them is a state the
+    // viewer has to leave.
+    LaunchedEffect(notice) {
+        if (notice == null) return@LaunchedEffect
+        delay(NOTICE_TIMEOUT_MS)
+        notice = null
     }
 
     // The refusal notice clears itself; it is a nudge, not a state to escape.
@@ -451,7 +667,15 @@ fun PlayerScreen(
         while (isActive) {
             delay(PROGRESS_POST_INTERVAL_SECONDS * 1000)
             if (player.playbackState == Player.STATE_READY && player.isPlaying) {
-                api.postProgress(mediaId, player.currentPosition / 1000.0)
+                api.postProgress(
+                    mediaId,
+                    player.currentPosition / 1000.0,
+                    // Only once the player has actually resolved it. Before
+                    // that Media3 reports TIME_UNSET, and durationSeconds is
+                    // what the Watching shelf uses to decide a title is
+                    // finished — a wrong one hides it for good.
+                    player.duration.takeIf { it > 0 }?.let { it / 1000.0 },
+                )
             }
         }
     }
@@ -517,6 +741,10 @@ fun PlayerScreen(
     fun retry() {
         failure = null
         buffering = true
+        // A deliberate press is a fresh start: the automatic budget was spent
+        // on the last drop, and refusing to reconnect after the viewer asked
+        // would make the retry key look broken.
+        streamRetries = 0
         player.prepare()
         player.play()
     }
@@ -529,12 +757,28 @@ fun PlayerScreen(
      * a different one whenever the track list is rebuilt.
      */
     fun chooseAudio(option: AudioOption) {
+        // Picking a track this device has no decoder for used to be allowed:
+        // the row was greyed but OK still selected it, and the result was
+        // silence, or the whole film dying on a renderer error. The menu now
+        // says no and stays open, so the next press lands on a track that
+        // will actually play.
+        if (!option.supported) {
+            notice = "\"${option.label}\" is a format this device cannot decode."
+            touch()
+            return
+        }
+
         player.trackSelectionParameters = player.trackSelectionParameters
             .buildUpon()
+            // Clears the switch-off that an earlier undecodable soundtrack
+            // may have left behind; without it a deliberate choice would be
+            // overridden by the recovery from a previous one.
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
             .setOverrideForType(
                 TrackSelectionOverride(option.group.mediaTrackGroup, option.indexInGroup),
             )
             .build()
+        audioDisabled = false
         audioMenuVisible = false
         touch()
     }
@@ -542,9 +786,19 @@ fun PlayerScreen(
     /** Leaving saves position first — otherwise up to ten seconds of watching
      * is lost every time someone backs out. */
     fun leave() {
-        api.postProgressAsync(mediaId, player.currentPosition / 1000.0)
+        api.postProgressAsync(
+            mediaId,
+            player.currentPosition / 1000.0,
+            player.duration.takeIf { it > 0 }?.let { it / 1000.0 },
+        )
         onBack()
     }
+
+    // Normally there is nothing to choose between with one soundtrack. The
+    // exception is a lone track that had to be switched off to save the
+    // picture: the list is then the only way back to trying it again, so a
+    // single entry is worth showing.
+    val audioChoosable = audio.size > 1 || (audio.isNotEmpty() && audioDisabled)
 
     Box(
         Modifier
@@ -620,7 +874,7 @@ fun PlayerScreen(
                     // three open the audio list. A file with one soundtrack
                     // has nothing to show, and the key falls through instead.
                     Key.Menu, Key.Info, Key.M -> {
-                        if (audio.size > 1) {
+                        if (audioChoosable) {
                             audioMenuVisible = true
                             touch()
                             true
@@ -635,7 +889,7 @@ fun PlayerScreen(
                     // sofa; the arrow keys are the one part of a remote that
                     // always exists.
                     Key.DirectionUp -> {
-                        if (audio.size > 1) {
+                        if (audioChoosable) {
                             audioCursor = audio.indexOfFirst { it.selected }.coerceAtLeast(0)
                             audioMenuVisible = true
                         }
@@ -690,16 +944,37 @@ fun PlayerScreen(
                         .background(K.Scrim.copy(alpha = 0.62f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        if (isPlaying) "▶" else "❚❚",
-                        style = K.PageTitle,
-                        color = K.TextPrimary,
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.PlayArrow else KIcons.Pause,
+                        contentDescription = if (isPlaying) "Playing" else "Paused",
+                        tint = K.TextPrimary,
+                        modifier = Modifier.size(40.dp),
                     )
                 }
             }
         }
 
         failure?.let { message -> PlaybackFailure(title = title, message = message) }
+
+        // Above the picture, out of the way of the transport at the bottom
+        // and of the audio panel at the right. It reports something that has
+        // already been handled, so it must never look like a dialog waiting
+        // on an answer.
+        notice?.takeIf { failure == null }?.let { message ->
+            Text(
+                message,
+                style = K.Body,
+                color = K.TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(K.Gutter)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(K.Scrim.copy(alpha = 0.82f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
 
         if (audioMenuVisible) AudioMenu(options = audio, cursor = audioCursor)
 
@@ -716,7 +991,7 @@ fun PlayerScreen(
                 duration = duration,
                 isPlaying = isPlaying,
                 seekTargetMs = seekTargetMs,
-                hasAudioChoice = audio.size > 1,
+                hasAudioChoice = audioChoosable,
                 seekable = seekable != false,
                 seekRefused = seekRefused,
             )
@@ -770,7 +1045,18 @@ internal fun AudioMenu(options: List<AudioOption>, cursor: Int) {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("Audio", style = K.Section, color = K.TextPrimary)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = KIcons.Audio,
+                    contentDescription = null,
+                    tint = K.Accent,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text("Audio", style = K.Section, color = K.TextPrimary)
+            }
             Text(
                 "▲ ▼  choose      OK  select      BACK  close",
                 style = K.Eyebrow,
@@ -905,19 +1191,54 @@ internal fun Controls(
             }
             // A legend rather than buttons: the remote already has these keys,
             // and focusable on-screen buttons would steal the arrow keys that
-            // seeking needs. The audio entry appears only when the file
-            // actually carries a second soundtrack.
-            Text(
-                buildString {
-                    append(if (isPlaying) "OK  PAUSE" else "OK  PLAY")
-                    // No point advertising keys that this file will refuse.
-                    if (seekable) append("      ◀ ▶  10s      ◀◀ ▶▶  30s")
-                    if (hasAudioChoice) append("      ▲  AUDIO")
-                },
-                style = K.Eyebrow,
-                color = K.TextFaint,
-            )
+            // seeking needs. Each entry is the icon for what the key does
+            // beside the key that does it — a glyph reads across a room in a
+            // way a row of words does not.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Hint(
+                    icon = if (isPlaying) KIcons.Pause else Icons.Filled.PlayArrow,
+                    description = if (isPlaying) "Pause" else "Play",
+                    key = "OK",
+                )
+                // No point advertising keys that this file will refuse. The
+                // D-pad entry keeps its arrows as text — a remote's direction
+                // pad has no icon of its own, and drawing one would invent a
+                // symbol the viewer has never seen.
+                if (seekable) {
+                    Text("◀ ▶  10s", style = K.Eyebrow, color = K.TextFaint)
+                    Hint(KIcons.FastRewind, "Rewind", "30s")
+                    Hint(KIcons.FastForward, "Fast forward", "30s")
+                }
+                // Only when the file actually offers a choice.
+                if (hasAudioChoice) Hint(KIcons.Audio, "Audio track", "▲")
+            }
         }
+    }
+}
+
+/**
+ * One entry in the transport legend: what the key does, then which key.
+ *
+ * The icon carries the meaning and the label carries the key, which is the
+ * right split — the viewer already knows what a pause symbol means and needs
+ * telling only which button on the remote produces it.
+ */
+@Composable
+private fun Hint(icon: ImageVector, description: String, key: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = K.TextMuted,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(key, style = K.Eyebrow, color = K.TextFaint)
     }
 }
 

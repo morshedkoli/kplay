@@ -24,14 +24,17 @@ export async function GET(request) {
   } catch (err) {
     return Response.json({ error: 'Invalid id' }, { status: 400 });
   }
-  return Response.json({ positionSeconds: doc?.positionSeconds ?? 0 });
+  return Response.json({
+    positionSeconds: doc?.positionSeconds ?? 0,
+    durationSeconds: doc?.durationSeconds ?? null,
+  });
 }
 
 export async function POST(request) {
   const authError = await requireDeviceOrSession(request);
   if (authError) return authError;
 
-  const { id, positionSeconds } = await request.json();
+  const { id, positionSeconds, durationSeconds } = await request.json();
   if (!id || typeof positionSeconds !== 'number') {
     return Response.json({ error: 'id and positionSeconds are required' }, { status: 400 });
   }
@@ -44,10 +47,15 @@ export async function POST(request) {
   } catch (err) {
     return Response.json({ error: 'Invalid id' }, { status: 400 });
   }
-  await progress.updateOne(
-    { itemId: objectId },
-    { $set: { itemId: objectId, positionSeconds, updatedAt: new Date() } },
-    { upsert: true }
-  );
+  // Duration is optional and only written when the caller actually knows it.
+  // /api/media/watching needs it to tell "half way through" from "finished",
+  // but a client that has not started playback has nothing truthful to send,
+  // and a zero would make every title look unwatched forever.
+  const update = { itemId: objectId, positionSeconds, updatedAt: new Date() };
+  if (typeof durationSeconds === 'number' && durationSeconds > 0) {
+    update.durationSeconds = durationSeconds;
+  }
+
+  await progress.updateOne({ itemId: objectId }, { $set: update }, { upsert: true });
   return Response.json({ ok: true });
 }

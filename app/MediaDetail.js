@@ -80,7 +80,16 @@ export default function MediaDetail({ id }) {
     fetch('/api/media/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: playingId, positionSeconds: now }),
+      // Duration goes along whenever the browser has decoded it. The TV app's
+      // Watching shelf uses it to tell a half-watched title from a finished
+      // one, so a film watched here still leaves the shelf correctly there.
+      body: JSON.stringify({
+        id: playingId,
+        positionSeconds: now,
+        ...(Number.isFinite(video.duration) && video.duration > 0
+          ? { durationSeconds: video.duration }
+          : {}),
+      }),
     }).catch(() => {});
   }, [playingId]);
 
