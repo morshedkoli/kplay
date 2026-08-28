@@ -9,9 +9,16 @@
 // It also writes `metadata.json`: version, size, build date and a SHA-256, so
 // the panel can say what it is offering and anyone can check what they got.
 //
-// Usage:  npm run apk:stage        (after `cd android-tv && ./gradlew assembleDebug`)
+// Usage:  npm run apk:stage        (after building the APK yourself)
 //         npm run apk:build        (does the Gradle build first)
+//
+// The Gradle build runs from here rather than from an npm script string,
+// because npm runs those through cmd.exe on Windows and cmd has no `./` —
+// `cd android-tv && ./gradlew assembleDebug` failed with "'.' is not
+// recognized". The wrapper's name differs per platform too, so choosing it is
+// a decision, not something a shell string can carry.
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -39,13 +46,40 @@ function versionFromGradleOutput() {
   }
 }
 
+/** Runs the Gradle build, with the wrapper this platform actually has. */
+function build() {
+  const androidDir = join(root, 'android-tv');
+  const wrapper =
+    process.platform === 'win32' ? join(androidDir, 'gradlew.bat') : join(androidDir, 'gradlew');
+
+  console.log('Building the APK…');
+  // Windows cannot exec a .bat directly, so it goes through the shell as one
+  // quoted string. Node warns about passing an args array alongside `shell`,
+  // and rightly — the two together concatenate without escaping.
+  const result =
+    process.platform === 'win32'
+      ? spawnSync(`"${wrapper}" assembleDebug`, { cwd: androidDir, stdio: 'inherit', shell: true })
+      : spawnSync(wrapper, ['assembleDebug'], { cwd: androidDir, stdio: 'inherit' });
+
+  if (result.error) {
+    console.error(`Could not run ${wrapper}: ${result.error.message}`);
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    console.error(`Gradle build failed (exit ${result.status}) — nothing staged.`);
+    process.exit(result.status ?? 1);
+  }
+}
+
 function main() {
+  if (process.argv.includes('--build')) build();
+
   let apk;
   try {
     apk = readFileSync(SOURCE);
   } catch {
     console.error(`No APK at ${SOURCE}`);
-    console.error('Build one first:  cd android-tv && ./gradlew assembleDebug');
+    console.error('Build one first:  npm run apk:build');
     process.exit(1);
   }
 
