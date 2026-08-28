@@ -12,11 +12,17 @@
         android:name="android.software.leanback"
         android:required="false" />
 
+    <!-- largeHeap: the media buffer is Java byte arrays on the app heap, and
+         a deep buffer is what keeps a high-bitrate direct-play file from
+         stuttering. Without it the heap growth limit on a television box
+         (often 192 MB, shared with the rest of the app) is the real ceiling
+         on how much video can be held ahead of the playhead. -->
     <application
         android:allowBackup="true"
         android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:largeHeap="true"
         android:theme="@style/Theme.KPlayTV">
 
         <activity

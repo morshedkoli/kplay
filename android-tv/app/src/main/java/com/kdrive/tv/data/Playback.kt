@@ -63,13 +63,15 @@ private const val BACK_BUFFER_MS = 30_000
  * is roughly six seconds: the player was buffering seconds, not minutes, and
  * every dip in throughput between the VPS and the television became a stall.
  *
- * 192 MB is about 90 seconds of a 17 Mbit/s film and about ten minutes of a
- * modest 2.5 Mbit/s one, and it is memory the player allocates only as it
- * fills. Paired with prioritizeTimeOverSizeThresholds below, the duration
- * targets become the real limit for ordinary bitrates and this becomes the
- * backstop for extreme ones.
+ * The ceiling is the process heap, not the device's RAM: these are Java byte
+ * arrays, and Android caps an app's heap well below physical memory —
+ * commonly 192-256 MB on a television box. 64 MB leaves room for the rest of
+ * the app while still being five times the default: around 35 seconds of a
+ * 15 Mbit/s film, and several minutes of an ordinary 2.5 Mbit/s one. Paired
+ * with prioritizeTimeOverSizeThresholds below, the duration targets are what
+ * bind at ordinary bitrates and this is the backstop for extreme ones.
  */
-private const val TARGET_BUFFER_BYTES = 192 * 1024 * 1024
+private const val TARGET_BUFFER_BYTES = 64 * 1024 * 1024
 
 /** Disk budget for the read-through cache. Big enough to hold an episode or
  * most of a film, small enough to leave a TV box's storage alone. */

@@ -106,6 +106,28 @@ sudo ln -sf /etc/nginx/sites-available/kdrive /etc/nginx/sites-enabled/kdrive &&
 sudo certbot --nginx -d murshedkoli.me
 ```
 
+### Re-copying the config after TLS is set up
+
+Certbot edits the installed site file in place — it adds the `listen 443 ssl`
+block and the certificate paths. The copy in this repository has neither, so
+copying it over an existing install **removes TLS** and the site drops to
+port 80 only. `nginx -t` still passes, and the first sign of trouble is
+`curl: (7) Failed to connect ... port 443`.
+
+Put the certificate back in (the certificate itself is never touched, so this
+is a config edit, not a re-issue):
+
+```bash
+sudo certbot install --cert-name murshedkoli.me
+```
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+`sudo certbot certificates` lists the names available if that one is not
+found.
+
 ## Updating
 
 ```bash
