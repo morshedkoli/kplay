@@ -299,6 +299,49 @@ class ScreenshotTest {
         )
     }
 
+    /**
+     * A movie whose download is paused part-way.
+     *
+     * The state, the percentage and the next action all have to read off one
+     * button without it becoming a sentence — and Remove has to be visibly
+     * somewhere else, so nobody deletes four gigabytes reaching for resume.
+     */
+    @OptIn(UnstableApi::class)
+    @Test
+    fun `movie detail with paused download`() {
+        val loader = fakeImages()
+        rule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                DetailContent(
+                    item = MediaDetail(
+                        id = "1",
+                        type = "movie",
+                        title = "Inception",
+                        description = "A thief who steals corporate secrets through " +
+                            "dream-sharing technology is given the inverse task of " +
+                            "planting an idea into the mind of a CEO.",
+                        year = 2010,
+                        posterPath = "/p.jpg",
+                        backdropPath = "/b.jpg",
+                        status = "matched",
+                        driveFileId = "drive-1",
+                    ),
+                    api = api,
+                    imageLoader = loader,
+                    onPlay = { _, _ -> },
+                    downloads = mapOf(
+                        "1" to download("1", "Inception", Download.STATE_STOPPED, 37f),
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        rule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/movie-detail-paused.png",
+            roborazziOptions = RoborazziOptions(),
+        )
+    }
+
     @Test
     fun `movie detail`() {
         val loader = fakeImages()

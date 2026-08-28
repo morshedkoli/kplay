@@ -49,6 +49,8 @@ import com.kdrive.tv.ui.components.ActionButton
 import com.kdrive.tv.ui.components.DownloadButton
 import com.kdrive.tv.ui.components.DownloadChip
 import com.kdrive.tv.ui.components.FocusBox
+import com.kdrive.tv.ui.components.downloadStatusLine
+import com.kdrive.tv.ui.components.RemoveDownloadButton
 import com.kdrive.tv.ui.theme.K
 
 /**
@@ -173,6 +175,8 @@ fun DetailScreen(
                         ),
                     )
                 },
+                onPauseDownload = { id -> Downloads.pause(context, id) },
+                onResumeDownload = { id -> Downloads.resume(context, id) },
                 onRemoveDownload = { id -> Downloads.remove(context, id) },
                 season = season,
                 onSeason = { season = it },
@@ -197,6 +201,8 @@ internal fun DetailContent(
      * streams, so a row can look itself up without a mapping. */
     downloads: Map<String, Download> = emptyMap(),
     onDownload: (id: String) -> Unit = {},
+    onPauseDownload: (id: String) -> Unit = {},
+    onResumeDownload: (id: String) -> Unit = {},
     onRemoveDownload: (id: String) -> Unit = {},
     season: Int? = item.seasons().firstOrNull()?.first,
     onSeason: (Int) -> Unit = {},
@@ -279,20 +285,34 @@ internal fun DetailContent(
                                     DownloadButton(
                                         download = download,
                                         onDownload = { onDownload(item.id) },
+                                        onPause = { onPauseDownload(item.id) },
+                                        onResume = { onResumeDownload(item.id) },
                                         onRemove = { onRemoveDownload(item.id) },
                                     )
+                                    // Only once there is something to delete,
+                                    // and never where the pause key was a
+                                    // moment ago.
+                                    if (download != null &&
+                                        download.state != Download.STATE_COMPLETED
+                                    ) {
+                                        RemoveDownloadButton(
+                                            onRemove = { onRemoveDownload(item.id) },
+                                        )
+                                    }
                                 }
                             }
-                            // Said once, plainly, at the moment it becomes
-                            // true. "10%" on its own means nothing; "enough to
-                            // start watching" is the fact behind the number.
-                            if (download != null && download.state != Download.STATE_COMPLETED &&
-                                download.playableOffline
-                            ) {
+                            // The state in words, under the buttons that act
+                            // on it. "10%" on its own means nothing; "enough
+                            // to start watching" is the fact behind it.
+                            downloadStatusLine(download)?.let { line ->
                                 Text(
-                                    "Enough downloaded to start watching — the rest arrives while you watch.",
+                                    line,
                                     style = K.Eyebrow,
-                                    color = K.TextMuted,
+                                    color = if (download?.playableOffline == true) {
+                                        K.TextMuted
+                                    } else {
+                                        K.TextFaint
+                                    },
                                 )
                             }
                         }
@@ -353,6 +373,8 @@ internal fun DetailContent(
                                             )
                                         },
                                         onDownload = { onDownload(episode.id) },
+                                        onPauseDownload = { onPauseDownload(episode.id) },
+                                        onResumeDownload = { onResumeDownload(episode.id) },
                                         onRemoveDownload = { onRemoveDownload(episode.id) },
                                         // With no Play button above, the first
                                         // episode is the screen's entry point
@@ -450,6 +472,8 @@ private fun EpisodeRow(
     focusRequester: FocusRequester? = null,
     download: Download? = null,
     onDownload: () -> Unit = {},
+    onPauseDownload: () -> Unit = {},
+    onResumeDownload: () -> Unit = {},
     onRemoveDownload: () -> Unit = {},
 ) {
     val playable = episode.driveFileId != null
@@ -527,6 +551,8 @@ private fun EpisodeRow(
             DownloadChip(
                 download = download,
                 onDownload = onDownload,
+                onPause = onPauseDownload,
+                onResume = onResumeDownload,
                 onRemove = onRemoveDownload,
             )
         }

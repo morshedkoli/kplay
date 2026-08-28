@@ -60,6 +60,10 @@ object Downloads {
      */
     private const val MAX_PARALLEL_DOWNLOADS = 1
 
+    /** Any non-zero value means stopped; this one means a person stopped it,
+     * as opposed to a requirement like the network going away. */
+    private const val STOP_REASON_PAUSED = 1
+
     @Volatile
     private var cache: SimpleCache? = null
 
@@ -162,8 +166,31 @@ object Downloads {
         )
     }
 
-    /** Removes it and its bytes. There is no "pause" counterpart on purpose:
-     * a half-download the viewer forgot about is just occupied disk. */
+    /**
+     * Stops fetching without discarding what has arrived.
+     *
+     * A stop reason is how Media3 expresses "paused": anything non-zero puts
+     * the download in STATE_STOPPED and leaves its bytes in the cache, so
+     * resuming carries on from where it stopped rather than starting the
+     * gigabytes again. The number itself is ours to choose and means only
+     * "the viewer asked".
+     */
+    fun pause(context: Context, id: String) = setStopReason(context, id, STOP_REASON_PAUSED)
+
+    /** Puts it back in the queue, keeping everything already downloaded. */
+    fun resume(context: Context, id: String) = setStopReason(context, id, Download.STOP_REASON_NONE)
+
+    private fun setStopReason(context: Context, id: String, reason: Int) {
+        DownloadService.sendSetStopReason(
+            context,
+            KDownloadService::class.java,
+            id,
+            reason,
+            /* foreground = */ false,
+        )
+    }
+
+    /** Removes it and its bytes. */
     fun remove(context: Context, id: String) {
         DownloadService.sendRemoveDownload(
             context,
