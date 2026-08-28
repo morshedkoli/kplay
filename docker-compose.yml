@@ -7,13 +7,10 @@ services:
     # the app. Publishing on 0.0.0.0 would let anyone hit it over plain HTTP
     # and bypass TLS.
     #
-    # Host port is 3100, not 3000: this VPS already runs another Next.js app
-    # (koliDrive, on murshedkoli.me) which occupies the default. Only the host
-    # side moves — the container still listens on 3000, so the healthcheck and
-    # the Dockerfile's PORT stay as they are. Keep this in sync with
-    # `server 127.0.0.1:3100` in deploy/nginx/kdrive.conf.
+    # kPlay is the only app on this VPS, so it takes the default port. Keep
+    # this in sync with `server 127.0.0.1:3000` in deploy/nginx/kdrive.conf.
     ports:
-      - '127.0.0.1:3100:3000'
+      - '127.0.0.1:3000:3000'
     env_file:
       - .env.production
     healthcheck:

@@ -1,6 +1,6 @@
 # Deploying kPlay to a VPS
 
-Docker Compose runs the app on `127.0.0.1:3100`; nginx on the host terminates
+Docker Compose runs the app on `127.0.0.1:3000`; nginx on the host terminates
 TLS and proxies to it. MongoDB stays on Atlas.
 
 ## Why a VPS and not Vercel
@@ -14,6 +14,50 @@ The two heavy routes don't fit a serverless platform:
 
 On a VPS both are just long-lived HTTP connections, which is what the nginx
 config below is tuned for.
+
+## Wiping a VPS that ran something else
+
+Only do this on a box whose current contents you are willing to lose — the
+steps below destroy every container, image, and volume on the host, including
+any database that lived in a Docker volume. Take backups first.
+
+```bash
+docker ps -a
+```
+
+```bash
+docker compose -f /path/to/old/docker-compose.yml down -v
+```
+
+Then remove everything Docker still holds:
+
+```bash
+docker system prune -a --volumes -f
+```
+
+Disable the old nginx sites and reload, so the freed port and hostname stop
+being served:
+
+```bash
+ls -l /etc/nginx/sites-enabled/
+```
+
+```bash
+sudo rm -f /etc/nginx/sites-enabled/<old-site> && sudo nginx -t && sudo systemctl reload nginx
+```
+
+Certbot renews certificates for domains that no longer resolve here and will
+start emailing about failures. Drop the ones you have retired:
+
+```bash
+sudo certbot delete --cert-name <old-domain>
+```
+
+Finally remove the old checkout and its secrets:
+
+```bash
+sudo rm -rf /srv/<old-app>
+```
 
 ## One-time VPS setup
 
@@ -59,7 +103,7 @@ sudo ln -sf /etc/nginx/sites-available/kdrive /etc/nginx/sites-enabled/kdrive &&
 ```
 
 ```bash
-sudo certbot --nginx -d play.murshedkoli.me
+sudo certbot --nginx -d murshedkoli.me
 ```
 
 ## Updating
@@ -77,7 +121,7 @@ docker image prune -f
 ## Checks
 
 ```bash
-curl -fsS https://play.murshedkoli.me/api/health
+curl -fsS https://murshedkoli.me/api/health
 ```
 
 ```bash
@@ -87,9 +131,8 @@ docker compose ps && docker compose logs -f --tail=100 app
 ## Firewall
 
 Only 80, 443, and SSH should be open. The app port is published to `127.0.0.1`
-only in `docker-compose.yml` (host port 3100, since 3000 is taken by the other
-site on this VPS), so it isn't reachable from outside even if the
-firewall is permissive — don't change that binding to `0.0.0.0`.
+only in `docker-compose.yml`, so it is not reachable from outside even if the
+firewall is permissive — do not change that binding to `0.0.0.0`.
 
 ## Notes on sizing
 

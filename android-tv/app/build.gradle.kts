@@ -33,7 +33,7 @@ fun resolveConfig(gradleProperty: String, envVar: String, default: String = ""):
 /** The server this app is built for. Committed on purpose: a public URL is
  * not a secret, and baking it in is what lets the app open straight into the
  * library instead of asking a remote to type it. */
-val DEFAULT_SERVER_URL = "https://kplay-lemon.vercel.app"
+val DEFAULT_SERVER_URL = "https://murshedkoli.me"
 
 android {
     namespace = "com.kdrive.tv"
