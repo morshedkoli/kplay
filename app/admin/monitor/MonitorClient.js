@@ -33,6 +33,21 @@ function formatDuration(seconds) {
   return `${m}m ${s % 60}s`;
 }
 
+/**
+ * Mean of a sample field over the last `seconds`.
+ *
+ * Every rate on this page is bursty by nature — Drive fills the read-ahead
+ * buffer and then stops while the player drains it — so the newest single
+ * sample regularly reads zero on a healthy stream. Averaging is what makes the
+ * number comparable to a file's bitrate.
+ */
+function average(samples, key, seconds, intervalMs) {
+  const count = Math.max(1, Math.round((seconds * 1000) / intervalMs));
+  const window = samples.slice(-count);
+  if (!window.length) return 0;
+  return window.reduce((total, sample) => total + (sample[key] || 0), 0) / window.length;
+}
+
 function timeAgo(at, now) {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
@@ -100,7 +115,10 @@ function diagnose(data) {
   const latest = data.samples[data.samples.length - 1];
   if (!latest) return null;
 
-  const swapping = latest.swapUsedBytes > 64 * 1024 * 1024;
+  // Paging rate, not swap occupancy: a swap file still holding pages from an
+  // earlier build costs nothing, and testing occupancy reported a swapping box
+  // on an idle one with over a gigabyte free.
+  const swapping = average(data.samples, 'swapPagesPerSec', 60, data.sampleIntervalMs) > 100;
   const memoryPct = latest.memoryLimitBytes
     ? (latest.memoryUsedBytes / latest.memoryLimitBytes) * 100
     : 0;
@@ -109,7 +127,7 @@ function diagnose(data) {
     return {
       tone: 'bad',
       text:
-        'The box is swapping. Every read is queued behind disk IO and playback will stutter ' +
+        'The box is paging to disk. Every read queues behind disk IO and playback will stutter ' +
         'regardless of bandwidth. Reduce concurrent streams, lower the read-ahead buffer, or add RAM.',
     };
   }
@@ -131,20 +149,49 @@ function diagnose(data) {
     return { tone: 'normal', text: 'Nothing streaming right now. Start a title to see the throughput comparison.' };
   }
 
-  const starved = streams.filter((s) => s.starvedTicks > s.fullBufferTicks);
-  if (starved.length) {
+  // Sustained rates, because the instantaneous ones swing between zero and a
+  // burst and neither extreme means anything on its own.
+  const driveAvg = streams.reduce((total, s) => total + s.driveAverage, 0);
+  const clientAvg = streams.reduce((total, s) => total + s.clientAverage, 0);
+
+  // What the file actually needs, taken from the last thing the television
+  // reported. Without a report this stays zero and the verdict says less
+  // rather than guessing.
+  const report = [...data.events].reverse().find((e) => e.detail && 'videoBitrate' in e.detail);
+  const needed = report?.detail?.videoBitrate || 0;
+
+  if (needed > 0 && clientAvg * 8 < needed * 0.8) {
     return {
       tone: 'bad',
       text:
-        'The read-ahead buffer is running dry: Drive is not sending bytes as fast as the player wants them. ' +
-        'The bottleneck is the VPS-to-Google hop, and no client-side buffer tuning will fix it.',
+        `The file needs about ${(needed / 1_000_000).toFixed(1)} Mbps and the chain is sustaining ` +
+        `${((clientAvg * 8) / 1_000_000).toFixed(1)} Mbps. That gap is the stutter, and no buffer size closes ` +
+        'it — the fix is a faster path (a region closer to the viewer) or a smaller file (transcoding).',
+    };
+  }
+
+  const starved = streams.filter((s) => s.starvedTicks > s.fullBufferTicks);
+  if (starved.length && driveAvg <= clientAvg * 1.1) {
+    return {
+      tone: 'bad',
+      text:
+        'The read-ahead buffer is running dry and Drive is not getting ahead: the VPS-to-Google hop is the ' +
+        'bottleneck. No client-side buffer tuning fixes that.',
+    };
+  }
+  if (driveAvg > clientAvg * 1.3) {
+    return {
+      tone: 'warn',
+      text:
+        'Drive is delivering faster than the player is taking bytes, so the slow hop is downstream of this box — ' +
+        'the VPS uplink or the last mile to the television.',
     };
   }
   return {
     tone: 'normal',
     text:
-      'Drive is keeping the read-ahead buffer full, so the server has bytes in hand. If playback still stalls, ' +
-      'the slow hop is the VPS uplink or the last mile to the television — compare the two rates below.',
+      'Drive and the player are moving at about the same rate. Compare the sustained figure below against the ' +
+      "file's bitrate: if they are close, the link is simply at its limit.",
   };
 }
 
@@ -198,6 +245,9 @@ export default function MonitorClient() {
   const memoryPct = latest.memoryLimitBytes
     ? Math.round((latest.memoryUsedBytes / latest.memoryLimitBytes) * 100)
     : null;
+  const pagingAvg = average(samples, 'swapPagesPerSec', 60, data.sampleIntervalMs);
+  const driveSustained = average(samples, 'driveBytesPerSec', 60, data.sampleIntervalMs);
+  const clientSustained = average(samples, 'clientBytesPerSec', 60, data.sampleIntervalMs);
 
   return (
     <main className="mx-auto min-h-screen max-w-6xl p-6">
@@ -254,21 +304,19 @@ export default function MonitorClient() {
           />
         </Card>
 
+        {/* Paging rate is the headline, not occupancy: pages parked in swap
+            since an earlier build are harmless, pages moving are not. */}
         <Card
-          title="Swap"
-          value={formatBytes(latest.swapUsedBytes)}
+          title="Paging"
+          value={`${Math.round(latest.swapPagesPerSec || 0)}/s`}
           sub={
             latest.swapTotalBytes
-              ? `of ${formatBytes(latest.swapTotalBytes)} — any sustained use means stalls`
+              ? `${formatBytes(latest.swapUsedBytes)} of ${formatBytes(latest.swapTotalBytes)} swap held`
               : 'no swap configured'
           }
-          tone={latest.swapUsedBytes > 64 * 1024 * 1024 ? 'bad' : 'normal'}
+          tone={pagingAvg > 100 ? 'bad' : pagingAvg > 10 ? 'warn' : 'normal'}
         >
-          <Spark
-            values={samples.map((s) => s.swapUsedBytes)}
-            max={latest.swapTotalBytes || null}
-            color="#f87171"
-          />
+          <Spark values={samples.map((s) => s.swapPagesPerSec || 0)} color="#f87171" />
         </Card>
 
         <Card
@@ -294,17 +342,21 @@ export default function MonitorClient() {
 
       {/* The comparison the whole page is for. */}
       <section className="mt-4 grid gap-4 sm:grid-cols-2">
+        {/* Sustained figure first. Drive bursts — it fills the read-ahead
+            buffer then stops while the player drains it — so the
+            instantaneous rate reads zero during every pause and is only
+            meaningful beside the average. */}
         <Card
           title="Drive → VPS"
-          value={formatRate(latest.driveBytesPerSec)}
-          sub="bytes arriving from Google, summed across active streams"
+          value={formatRate(driveSustained)}
+          sub={`sustained over 60s · now ${formatRate(latest.driveBytesPerSec)}`}
         >
           <Spark values={samples.map((s) => s.driveBytesPerSec)} color="#34d399" />
         </Card>
         <Card
           title="VPS → player"
-          value={formatRate(latest.clientBytesPerSec)}
-          sub="bytes leaving this process towards nginx and the television"
+          value={formatRate(clientSustained)}
+          sub={`sustained over 60s · now ${formatRate(latest.clientBytesPerSec)}`}
         >
           <Spark values={samples.map((s) => s.clientBytesPerSec)} color="#60a5fa" />
         </Card>
@@ -313,14 +365,14 @@ export default function MonitorClient() {
       <section className="mt-4 grid gap-4 sm:grid-cols-2">
         <Card
           title="Interface in"
-          value={formatRate(latest.netRxBytesPerSec)}
+          value={formatRate(average(samples, 'netRxBytesPerSec', 60, data.sampleIntervalMs))}
           sub="everything the container received, video included"
         >
           <Spark values={samples.map((s) => s.netRxBytesPerSec)} color="#34d399" />
         </Card>
         <Card
           title="Interface out"
-          value={formatRate(latest.netTxBytesPerSec)}
+          value={formatRate(average(samples, 'netTxBytesPerSec', 60, data.sampleIntervalMs))}
           sub="everything the container sent"
         >
           <Spark values={samples.map((s) => s.netTxBytesPerSec)} color="#60a5fa" />
@@ -412,6 +464,7 @@ function StreamTable({ title, rows, now, empty, showOutcome = false }) {
                 <th className="px-3 py-2 font-medium">Started</th>
                 <th className="px-3 py-2 font-medium">From Drive</th>
                 <th className="px-3 py-2 font-medium">To player</th>
+                <th className="px-3 py-2 font-medium">Now</th>
                 <th className="px-3 py-2 font-medium">Transferred</th>
                 {/* The honest answer to "was the server keeping up": how often
                     the read-ahead buffer was full versus empty. */}
@@ -428,8 +481,13 @@ function StreamTable({ title, rows, now, empty, showOutcome = false }) {
                       {row.title || row.id}
                     </td>
                     <td className="px-3 py-2 text-[var(--ink-soft)]">{timeAgo(row.startedAt, now)}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatRate(row.driveRate)}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatRate(row.clientRate)}</td>
+                    {/* Averages over the stream's life — the figures that
+                        compare against a file's bitrate. */}
+                    <td className="px-3 py-2 tabular-nums">{formatRate(row.driveAverage)}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatRate(row.clientAverage)}</td>
+                    <td className="px-3 py-2 tabular-nums text-[var(--ink-soft)]">
+                      {formatRate(row.clientRate)}
+                    </td>
                     <td className="px-3 py-2 tabular-nums text-[var(--ink-soft)]">
                       {formatBytes(row.clientBytes)}
                       {row.fileSize ? ` / ${formatBytes(row.fileSize)}` : ''}
