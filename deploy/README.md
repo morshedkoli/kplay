@@ -90,6 +90,52 @@ Create the MongoDB indexes once (safe to re-run; it's idempotent):
 docker compose run --rm app node lib/migrations/001-indexes.js
 ```
 
+## Kernel network tuning
+
+Required, not optional, when viewers are far from the droplet. A TCP
+connection carries one window per round trip, so its throughput ceiling is
+(window / RTT) regardless of how fast either link is. Measured on this
+deployment: Google Drive to the VPS ran at 170 Mbps, while the same bytes
+reached a viewer 256 ms away at 2.6 Mbps — the distance, not the bandwidth,
+was the limit, and it looked exactly like buffering.
+
+```bash
+sudo cp deploy/sysctl/99-kdrive-network.conf /etc/sysctl.d/
+```
+
+```bash
+sudo sysctl --system
+```
+
+Confirm BBR took effect (the kernel silently keeps the old value if the
+module is missing):
+
+```bash
+sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc
+```
+
+Both lines should read `bbr` and `fq`. If congestion control still says
+`cubic`, load the module and re-apply:
+
+```bash
+sudo modprobe tcp_bbr && echo tcp_bbr | sudo tee /etc/modules-load.d/bbr.conf && sudo sysctl --system
+```
+
+### If that is not enough
+
+Tuning raises the ceiling; it cannot remove the distance. If `/admin/monitor`
+still shows a sustained rate below the file's bitrate, the remaining options,
+cheapest first:
+
+1. **Move the droplet to a region near the viewers.** Snapshot it, transfer
+   the snapshot to the new region, create a droplet from it, repoint DNS and
+   re-issue the certificate. Nothing is lost — MongoDB is on Atlas and the
+   media is in Drive.
+2. **Download before watching.** The Android TV client already supports this
+   and it is immune to the problem entirely.
+3. **Transcode to a lower bitrate.** The real fix for viewers on genuinely
+   slow links, and much the largest piece of work.
+
 ## nginx + TLS
 
 ```bash
@@ -158,6 +204,10 @@ firewall is permissive — do not change that binding to `0.0.0.0`.
 
 ## Notes on sizing
 
+- Throughput to a distant viewer is bounded by (TCP window / round trip), not
+  by the droplet's link speed. See the kernel tuning section above; without it
+  a viewer 250 ms away cannot exceed roughly 6 Mbps on one connection no
+  matter what the droplet or their home connection can do.
 - The stream route holds one Drive connection per active playback, and keeps up
   to 16 MB of read-ahead per stream so the Drive side can run ahead of the
   player instead of stalling every time the player's buffer fills. nginx keeps
