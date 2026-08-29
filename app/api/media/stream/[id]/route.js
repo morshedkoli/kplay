@@ -16,7 +16,7 @@
 // `X-Content-Type-Options: nosniff` and no `Access-Control-Allow-Origin`, so
 // a browser <video> refuses them both with and without `crossorigin`.
 
-import { PassThrough, Readable } from 'node:stream';
+import { PassThrough, Readable, Transform } from 'node:stream';
 
 import { ObjectId } from 'mongodb';
 
@@ -24,6 +24,7 @@ import { requireDeviceOrSession } from '@/lib/auth.js';
 import { getFileMetadata, streamFile } from '@/lib/gdrive.js';
 import { videoContentType } from '@/lib/library/video-types.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
+import { startStream } from '@/lib/monitor/metrics.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -168,12 +169,64 @@ export async function GET(request, { params }) {
     return Response.json({ error: 'Storage read failed' }, { status: 502 });
   }
 
+  // Metering, for /admin/monitor. The two counters are the same bytes measured
+  // entering and leaving this process, so whichever rate is lower names the
+  // slow hop: Drive->VPS, or VPS->television. That question is unanswerable
+  // from outside the app, which is why it is instrumented here rather than
+  // left to a system monitor. Cost is one addition per chunk.
+  //
+  // Both counters are Transforms rather than 'data' listeners on purpose: a
+  // 'data' listener puts the stream into flowing mode and discards the
+  // backpressure the read-ahead buffer exists to apply. A Transform counts in
+  // the pipeline and leaves that behaviour exactly as it was.
+  const meter = startStream({
+    id,
+    title: meta.name,
+    driveFileId,
+    rangeStart: range.start,
+    rangeEnd: range.end,
+    fileSize: meta.size,
+    client: request.headers.get('user-agent'),
+  });
+
   // Read ahead of the client rather than in lock-step with it (see
   // READ_AHEAD_BYTES). The pipe is torn down in both directions on failure so
   // a dead Drive socket cannot leave a half-open response hanging.
   const readAhead = new PassThrough({ highWaterMark: READ_AHEAD_BYTES });
-  result.stream.on('error', (err) => readAhead.destroy(err));
-  result.stream.pipe(readAhead);
+
+  // Written to by Drive: counts arriving bytes, and notes whether the
+  // read-ahead buffer ahead of it is full (Drive winning, the healthy case) or
+  // empty (the player waiting on Drive, the stall being investigated).
+  const countIn = new Transform({
+    transform(chunk, _enc, cb) {
+      meter.drive(chunk.length);
+      if (readAhead.writableLength >= READ_AHEAD_BYTES) meter.buffered();
+      else if (readAhead.writableLength === 0) meter.starved();
+      cb(null, chunk);
+    },
+  });
+
+  // Read from by the response: counts bytes actually leaving for nginx.
+  const countOut = new Transform({
+    transform(chunk, _enc, cb) {
+      meter.client(chunk.length);
+      cb(null, chunk);
+    },
+  });
+
+  // Errors must travel the whole pipeline: pipe() does not forward them, so
+  // without this a dead Drive socket leaves the response hanging open.
+  result.stream.on('error', (err) => {
+    meter.end('error');
+    countIn.destroy(err);
+    readAhead.destroy(err);
+    countOut.destroy(err);
+  });
+  readAhead.on('error', (err) => countOut.destroy(err));
+  countOut.on('end', () => meter.end('complete'));
+  countOut.on('close', () => meter.end('closed'));
+
+  result.stream.pipe(countIn).pipe(readAhead).pipe(countOut);
 
   // A seek or a closed tab aborts the request mid-download. Without this the
   // Drive-side socket stays open until it times out, and a night of scrubbing
@@ -181,8 +234,10 @@ export async function GET(request, { params }) {
   request.signal?.addEventListener(
     'abort',
     () => {
+      meter.end('aborted');
       result.stream.destroy();
       readAhead.destroy();
+      countOut.destroy();
     },
     { once: true }
   );
@@ -217,7 +272,7 @@ export async function GET(request, { params }) {
   };
   if (isPartial) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${meta.size}`;
 
-  return new Response(Readable.toWeb(readAhead), {
+  return new Response(Readable.toWeb(countOut), {
     status: isPartial ? 206 : 200,
     headers,
   });

@@ -67,6 +67,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.CueSeekMap
+import com.kdrive.tv.data.PlaybackTelemetry
 import com.kdrive.tv.data.loadControl
 import com.kdrive.tv.data.mediaSourceFactory
 import com.kdrive.tv.data.renderersFactory
@@ -426,6 +427,15 @@ fun PlayerScreen(
     DisposableEffect(view) {
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
+    }
+
+    // Playback diagnostics, reported to the server when this screen goes away.
+    // Keyed on the id so switching titles starts a fresh count rather than
+    // attributing one film's stalls to the next. See data/PlaybackTelemetry.kt.
+    val telemetry = remember(mediaId) { PlaybackTelemetry(api, mediaId, title) }
+    DisposableEffect(player, telemetry) {
+        telemetry.attach(player)
+        onDispose { telemetry.detach(player) }
     }
 
     DisposableEffect(player) {

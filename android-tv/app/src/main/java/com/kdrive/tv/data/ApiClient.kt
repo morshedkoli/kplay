@@ -29,6 +29,27 @@ private data class ProgressRequest(
 )
 
 /**
+ * What the television reports back about how a playback actually went.
+ *
+ * The server can measure the bytes it sent but not what the box did with
+ * them; this closes that gap so /admin/monitor can tell a slow link from a
+ * struggling decoder. See data/PlaybackTelemetry.kt for where it is filled in.
+ */
+@Serializable
+data class PlaybackReport(
+    val mediaId: String,
+    val title: String? = null,
+    val rebuffers: Int = 0,
+    val rebufferMs: Long = 0,
+    val droppedFrames: Int = 0,
+    val videoBitrate: Int = 0,
+    val videoFormat: String? = null,
+    val watchedMs: Long = 0,
+    val estimatedBandwidth: Long = 0,
+    val source: String = "tv",
+)
+
+/**
  * The server's time-to-byte table for a file the extractor cannot seek in.
  * `cues` is a list of [timeMs, byteOffset] pairs, ascending by time.
  */
@@ -220,6 +241,30 @@ class ApiClient(private val credentials: Credentials) {
             })
         } catch (e: Exception) {
             // Resume position is a convenience, never worth surfacing.
+        }
+    }
+
+    /**
+     * Posts a playback report. Fire-and-forget on OkHttp's dispatcher: it is
+     * sent as the player is being torn down, must not block that, and a
+     * diagnostic that fails is simply a diagnostic that is missing.
+     */
+    fun postPlaybackReportAsync(report: PlaybackReport) {
+        try {
+            val payload = json.encodeToString(PlaybackReport.serializer(), report)
+            val req = Request.Builder()
+                .url("${credentials.serverUrl}/api/admin/playback-report")
+                .header(DEVICE_KEY_HEADER, credentials.deviceKey)
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            http.newCall(req).enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: IOException) = Unit
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    response.close()
+                }
+            })
+        } catch (e: Exception) {
+            // Monitoring must never be able to break playback.
         }
     }
 

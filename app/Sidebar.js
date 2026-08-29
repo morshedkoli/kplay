@@ -41,6 +41,17 @@ const LINKS = [
     ),
   },
   {
+    href: '/admin/monitor',
+    label: 'Server',
+    icon: (
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 12h4l2.5-6 4 12L16 12h5"
+      />
+    ),
+  },
+  {
     href: '/admin/usage',
     label: 'Usage',
     icon: (
