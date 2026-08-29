@@ -190,6 +190,23 @@ object Downloads {
         )
     }
 
+    /**
+     * Whether any bytes of this title are on the device.
+     *
+     * Playback asks before choosing where to stream from. The download cache
+     * is keyed by the URL the download was fetched with — the proxy stream
+     * URL — so playing a downloaded title over a direct Drive URL would miss
+     * every cached byte and re-fetch a film that is already on the disk.
+     * Anything with a download record therefore stays on the proxy path.
+     *
+     * A partial download counts: reading the part that arrived from disk and
+     * the rest from the network is the behaviour downloadCacheReader exists
+     * for.
+     */
+    fun isDownloaded(context: Context, id: String): Boolean = runCatching {
+        manager(context).downloadIndex.getDownload(id) != null
+    }.getOrDefault(false)
+
     /** Removes it and its bytes. */
     fun remove(context: Context, id: String) {
         DownloadService.sendRemoveDownload(

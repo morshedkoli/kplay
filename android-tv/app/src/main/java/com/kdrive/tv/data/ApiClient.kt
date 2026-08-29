@@ -1,6 +1,7 @@
 package com.kdrive.tv.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -12,6 +13,15 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 private const val DEVICE_KEY_HEADER = "x-kdrive-device-key" // matches lib/auth.js
+
+/**
+ * How long before a direct URL's token expires to stop reusing it.
+ *
+ * A range request opened at the last second still has to run, so the URL has
+ * to outlive the moment it was handed out. Two minutes covers a connection
+ * that opens slowly on a long path.
+ */
+private const val TOKEN_REFRESH_MARGIN_MS = 2 * 60 * 1000L
 
 class ApiError(message: String, val httpStatus: Int? = null) : Exception(message)
 
@@ -47,6 +57,39 @@ data class PlaybackReport(
     val watchedMs: Long = 0,
     val estimatedBandwidth: Long = 0,
     val source: String = "tv",
+)
+
+/**
+ * Where to fetch a title's bytes from — GET /api/media/play-url/[id].
+ *
+ * `mode` is "direct" for a URL that points at Google Drive itself, with the
+ * server out of the byte path entirely, or "proxy" for the stream route that
+ * pipes the bytes through the server. The client never decides which: whether
+ * a file can be played directly depends on its container and on server
+ * configuration, both of which change without the app being rebuilt.
+ */
+@Serializable
+data class PlayUrlResponse(
+    val mode: String = "proxy",
+    val url: String = "",
+    val contentType: String? = null,
+    val size: Long = 0,
+    val expiresAt: Long = 0,
+    val reason: String? = null,
+)
+
+/**
+ * A resolved place to stream from, with what the player needs to open it.
+ *
+ * `direct` decides two things beyond the URL. Whether the device key may be
+ * attached to the request — it must never leave our own server, see
+ * Playback.kt — and whether the cache may be keyed by URL, which a direct URL
+ * cannot be, because the token inside it differs on every playback.
+ */
+data class PlaySource(
+    val url: String,
+    val direct: Boolean,
+    val mimeType: String?,
 )
 
 /**
@@ -288,8 +331,76 @@ class ApiClient(private val credentials: Credentials) {
     /**
      * URL Media3 streams from. Accepts a media _id or an episode _id — the
      * route resolves either (app/api/media/stream/[id]/route.js).
+     *
+     * Still the only URL a download uses: a direct Drive URL carries an access
+     * token that expires within the hour, which downloading a film outlives
+     * comfortably.
      */
     fun streamUrl(id: String) = "${credentials.serverUrl}/api/media/stream/$id"
+
+    /**
+     * Last direct answer per id, with the moment it stops being usable.
+     *
+     * A direct URL is resolved once per HTTP connection, not once per
+     * playback (see Playback.kt), and ExoPlayer opens a new connection on
+     * every seek and every reconnect. Asking the server each time would put a
+     * round trip on the long path in front of each of those. The answer is
+     * good until its token expires, so it is held until then.
+     */
+    private val directCache = java.util.concurrent.ConcurrentHashMap<String, Pair<PlaySource, Long>>()
+
+    /**
+     * Blocking variant for ExoPlayer's loading thread, which is not a
+     * coroutine and must not have one launched onto it.
+     *
+     * Returns a cached URL while its token has comfortably long left, and
+     * fetches a fresh one otherwise — which is what keeps a film longer than
+     * the token's lifetime playing straight through.
+     */
+    fun playUrlBlocking(id: String): PlaySource {
+        val cached = directCache[id]
+        if (cached != null && cached.second > System.currentTimeMillis() + TOKEN_REFRESH_MARGIN_MS) {
+            return cached.first
+        }
+        return runBlocking { playUrl(id) }
+    }
+
+    /**
+     * Asks the server where this title's bytes should be fetched from.
+     *
+     * Any failure — the route missing on an older server, a network blip, JSON
+     * that does not parse — falls back to the proxy URL. Streaming through the
+     * server is what this app did before direct play existed, so the degraded
+     * path is the previously working one rather than an error.
+     */
+    suspend fun playUrl(id: String): PlaySource = withContext(Dispatchers.IO) {
+        val fallback = PlaySource(streamUrl(id), direct = false, mimeType = null)
+        try {
+            val answer = json.decodeFromString(
+                PlayUrlResponse.serializer(),
+                getText("/api/media/play-url/$id"),
+            )
+            if (answer.url.isBlank()) return@withContext fallback
+
+            if (answer.mode == "direct") {
+                PlaySource(answer.url, direct = true, mimeType = answer.contentType).also {
+                    if (answer.expiresAt > 0) directCache[id] = it to answer.expiresAt
+                }
+            } else {
+                // The proxy url arrives server-relative, so the host goes back
+                // on. Guarded against an absolute one in case the server ever
+                // starts sending those instead.
+                val url = if (answer.url.startsWith("http")) {
+                    answer.url
+                } else {
+                    "${credentials.serverUrl}${answer.url}"
+                }
+                PlaySource(url, direct = false, mimeType = answer.contentType)
+            }
+        } catch (e: Exception) {
+            fallback
+        }
+    }
 
     fun authHeaders(): Map<String, String> = mapOf(DEVICE_KEY_HEADER to credentials.deviceKey)
 }

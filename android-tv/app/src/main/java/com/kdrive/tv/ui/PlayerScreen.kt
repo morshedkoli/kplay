@@ -69,6 +69,8 @@ import com.kdrive.tv.data.ApiClient
 import com.kdrive.tv.data.CueSeekMap
 import com.kdrive.tv.data.PlaybackTelemetry
 import com.kdrive.tv.data.loadControl
+import com.kdrive.tv.data.Downloads
+import com.kdrive.tv.data.PlaySource
 import com.kdrive.tv.data.mediaSourceFactory
 import com.kdrive.tv.data.renderersFactory
 import com.kdrive.tv.ui.components.KIcons
@@ -533,9 +535,35 @@ fun PlayerScreen(
             ?.let { CueSeekMap.from(it.cues, (it.durationMs ?: 0L) * 1000) }
         indexed = seekMap != null
 
+        // Where the bytes come from. A direct answer points at Google and
+        // leaves the server out of the transfer entirely; a proxied one is the
+        // stream route this app has always used.
+        //
+        // A downloaded title never asks. Its bytes are on the disk under the
+        // proxy URL as their cache key, and fetching it from anywhere else
+        // would ignore them — a film already on the box would come down the
+        // network a second time, and would not play at all with the box
+        // offline, which is the entire point of having downloaded it.
+        val source = if (Downloads.isDownloaded(context, mediaId)) {
+            PlaySource(api.streamUrl(mediaId), direct = false, mimeType = null)
+        } else {
+            api.playUrl(mediaId)
+        }
+
+        val item = MediaItem.Builder()
+            .setUri(source.url)
+            // Google serves these as application/octet-stream, so a direct
+            // play gives the extractor nothing to go on but the bytes. The
+            // server knows the real type from the filename and sends it back
+            // with the URL; stating it here is what keeps container detection
+            // as reliable as it is on the proxy path, where the Content-Type
+            // header carries it.
+            .apply { source.mimeType?.let { setMimeType(it) } }
+            .build()
+
         player.setMediaSource(
-            mediaSourceFactory(context, api, seekMap)
-                .createMediaSource(MediaItem.fromUri(api.streamUrl(mediaId)))
+            mediaSourceFactory(context, source, cacheKey = mediaId, seekMap = seekMap)
+                .createMediaSource(item)
         )
         player.prepare()
         player.playWhenReady = true

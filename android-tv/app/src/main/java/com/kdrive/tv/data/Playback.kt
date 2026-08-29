@@ -1,12 +1,15 @@
 package com.kdrive.tv.data
 
 import android.content.Context
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -101,25 +104,36 @@ object PlaybackCache {
 }
 
 /**
- * The data source every load goes through: HTTP with the device key attached,
- * wrapped in a cache that reads what it already has and writes what it fetches.
+ * The data source every load goes through: HTTP, wrapped in a cache that reads
+ * what it already has and writes what it fetches.
  *
  * `setFlagIgnoreCacheOnError` matters: a corrupt or locked cache must degrade
  * to a plain network read, never to a failed playback.
+ *
+ * `source` decides whether the device key is attached and how the cache is
+ * keyed — see streamingDataSourceFactory. `cacheKey` is the id everything
+ * else in the app is keyed by, and is what a direct play is cached under.
  */
 @OptIn(UnstableApi::class)
-fun cachingDataSourceFactory(context: Context, api: ApiClient): DataSource.Factory =
+fun cachingDataSourceFactory(
+    context: Context,
+    source: PlaySource,
+    cacheKey: String,
+): DataSource.Factory =
     // Downloads first, and read-only. A title kept for offline is checked
     // before anything touches the network, which is what makes a downloaded
     // film play with the box disconnected — and what makes a partly
     // downloaded one play the part it has from disk while fetching the rest.
-    downloadCacheReader(context, streamingDataSourceFactory(context, api))
+    downloadCacheReader(context, streamingDataSourceFactory(context, source, cacheKey))
 
 /** The read-through cache used for everything that was not downloaded. */
 @OptIn(UnstableApi::class)
-private fun streamingDataSourceFactory(context: Context, api: ApiClient): DataSource.Factory {
+private fun streamingDataSourceFactory(
+    context: Context,
+    source: PlaySource,
+    cacheKey: String,
+): DataSource.Factory {
     val http = DefaultHttpDataSource.Factory()
-        .setDefaultRequestProperties(api.authHeaders())
         .setConnectTimeoutMs(HTTP_CONNECT_TIMEOUT_MS)
         .setReadTimeoutMs(HTTP_READ_TIMEOUT_MS)
         // A dropped connection mid-film should rebuffer, not end playback.
@@ -128,11 +142,79 @@ private fun streamingDataSourceFactory(context: Context, api: ApiClient): DataSo
         // position it read.
         .setAllowCrossProtocolRedirects(true)
 
-    return CacheDataSource.Factory()
+    // The device key authenticates this app to our own server and to nothing
+    // else. A direct play fetches from googleapis.com, and these are default
+    // request properties — set once, sent on every request the factory makes —
+    // so attaching them here would hand our shared secret to Google on every
+    // range request of every film. Only the proxy path gets them.
+    if (!source.direct) {
+        http.setDefaultRequestProperties(api(context)?.authHeaders() ?: emptyMap())
+    }
+
+    // A direct URL carries an access token that Google expires within the
+    // hour, and a film runs longer than that. Resolving the URI once at
+    // preparation would leave the player holding a URL that stops working
+    // partway through: every subsequent range request 401s, the retry path
+    // re-prepares against the same dead URL, and the film ends in an error
+    // screen an hour in.
+    //
+    // ResolvingDataSource asks again on every connection instead. ExoPlayer
+    // already opens a new one per seek and per reconnect, so a fresh token
+    // arrives naturally as playback proceeds, and the URL the network sees is
+    // never one that has expired. ApiClient caches the answer until its token
+    // is nearly out, so this is a round trip per token, not per request.
+    val upstream: DataSource.Factory = if (source.direct) {
+        ResolvingDataSource.Factory(http) { dataSpec ->
+            val fresh = api(context)?.playUrlBlocking(cacheKey)
+            // A refusal to resolve must not kill playback: keeping the spec
+            // as it is retries the URL in hand, which is still valid whenever
+            // the failure was the network rather than the token.
+            if (fresh != null && fresh.direct) dataSpec.withUri(Uri.parse(fresh.url)) else dataSpec
+        }
+    } else {
+        http
+    }
+
+    val cache = CacheDataSource.Factory()
         .setCache(PlaybackCache.get(context))
-        .setUpstreamDataSourceFactory(http)
+        .setUpstreamDataSourceFactory(upstream)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    // Media3 keys the cache by URI unless told otherwise. A direct URL carries
+    // an access token that is different on every playback, so the default key
+    // would never hit: the same film would be re-downloaded from Google each
+    // time and written to disk again under a new key, filling the 2 GB budget
+    // with copies of one title. The media id is stable and is what the rest of
+    // the app already keys by.
+    if (source.direct) {
+        cache.setCacheKeyFactory(CacheKeyFactory { cacheKey })
+    }
+
+    return cache
 }
+
+/**
+ * One ApiClient for the playback path, built once.
+ *
+ * Read here rather than passed in because the download service builds data
+ * sources without an ApiClient to hand, and a missing key must degrade to an
+ * unauthenticated request the server rejects cleanly — not to a crash.
+ *
+ * Held rather than rebuilt because the direct-URL resolver runs on every
+ * connection and a fresh instance each time would mean a fresh empty token
+ * cache each time: a round trip to the server, over the long path, in front
+ * of every single range request. It also re-reads credentials from disk on
+ * each call, which is not something to do on a loading thread.
+ */
+@Volatile
+private var playbackApi: ApiClient? = null
+
+private fun api(context: Context): ApiClient? =
+    playbackApi ?: synchronized(PlaybackCache) {
+        playbackApi ?: Credentials.loadBlocking(context.applicationContext)
+            ?.let { ApiClient(it) }
+            ?.also { playbackApi = it }
+    }
 
 /**
  * Extractors tuned for the containers people actually drop into a Drive
@@ -166,7 +248,8 @@ internal fun extractorsFactory() = DefaultExtractorsFactory()
 @OptIn(UnstableApi::class)
 fun mediaSourceFactory(
     context: Context,
-    api: ApiClient,
+    source: PlaySource,
+    cacheKey: String,
     seekMap: CueSeekMap? = null,
 ): MediaSource.Factory {
     // With a table from the server, every extractor is wrapped so a file the
@@ -176,7 +259,7 @@ fun mediaSourceFactory(
     val extractors = extractorsFactory()
         .let { if (seekMap != null) SeekIndexExtractorsFactory(it, seekMap) else it }
 
-    return DefaultMediaSourceFactory(cachingDataSourceFactory(context, api), extractors)
+    return DefaultMediaSourceFactory(cachingDataSourceFactory(context, source, cacheKey), extractors)
         .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(LOAD_ERROR_RETRIES))
 }
 
