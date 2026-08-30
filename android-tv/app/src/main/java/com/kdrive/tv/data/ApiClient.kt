@@ -72,6 +72,10 @@ data class PlaybackReport(
 data class PlayUrlResponse(
     val mode: String = "proxy",
     val url: String = "",
+    // Sent beside the URL rather than inside it: Google answers a request that
+    // carries the token as a query parameter with 403, so a direct play has to
+    // put it in an Authorization header.
+    val token: String? = null,
     val contentType: String? = null,
     val size: Long = 0,
     val expiresAt: Long = 0,
@@ -90,7 +94,14 @@ data class PlaySource(
     val url: String,
     val direct: Boolean,
     val mimeType: String?,
-)
+    /** Google's access token for a direct source, null for the proxy path. */
+    val token: String? = null,
+) {
+    /** What a direct request has to send to be served. Empty for the proxy
+     * path, whose own credential is the device key and is attached elsewhere. */
+    fun requestHeaders(): Map<String, String> =
+        if (direct && token != null) mapOf("Authorization" to "Bearer $token") else emptyMap()
+}
 
 /**
  * The server's time-to-byte table for a file the extractor cannot seek in.
@@ -383,7 +394,18 @@ class ApiClient(private val credentials: Credentials) {
             if (answer.url.isBlank()) return@withContext fallback
 
             if (answer.mode == "direct") {
-                PlaySource(answer.url, direct = true, mimeType = answer.contentType).also {
+                // Without a token the URL is unusable — Google refuses an
+                // unauthenticated alt=media read — so an answer missing one
+                // (an older server, say) takes the proxy rather than a URL
+                // that would 401 on every range request.
+                if (answer.token.isNullOrBlank()) return@withContext fallback
+
+                PlaySource(
+                    answer.url,
+                    direct = true,
+                    mimeType = answer.contentType,
+                    token = answer.token,
+                ).also {
                     if (answer.expiresAt > 0) directCache[id] = it to answer.expiresAt
                 }
             } else {

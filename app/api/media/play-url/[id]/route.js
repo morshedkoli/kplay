@@ -6,11 +6,11 @@
 //
 // This route offers the alternative. It answers with either
 //
-//   { mode: 'direct', url, contentType, size, expiresAt }
+//   { mode: 'direct', url, token, contentType, size, expiresAt }
 //   { mode: 'proxy',  url, contentType, size, reason }
 //
-// A 'direct' url points at Google, carries a short-lived access token, and is
-// fetched by the player itself — the VPS serves the metadata and then drops
+// A 'direct' url points at Google, is fetched with the short-lived access
+// token returned alongside it, and is read by the player itself — the VPS serves the metadata and then drops
 // out of the path. A 'proxy' url is the existing stream route, returned
 // whenever direct play is known not to work for this client or this file.
 //
@@ -149,17 +149,18 @@ export async function GET(request, { params }) {
     );
   }
 
-  // alt=media is the bytes endpoint, and it accepts the token as a query
-  // parameter — which is the only way to authenticate here, since the player
-  // fetching this URL cannot be told to send an Authorization header.
-  const url =
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}` +
-    `?alt=media&access_token=${encodeURIComponent(token)}`;
+  // alt=media is the bytes endpoint. The token travels beside the URL rather
+  // than inside it: Google no longer honours ?access_token= here and answers
+  // such a request with 403 and its automated-traffic page, which a player
+  // sees as a load failure on every range request — the film simply never
+  // starts. The client sends the token as an Authorization header instead,
+  // which is also what keeps it out of URLs, logs and cache keys.
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`;
 
   console.log(`[api/media/play-url] direct ${id} -> ${driveFileId} (${meta.name})`);
 
   return Response.json(
-    { mode: 'direct', url, contentType, size: meta.size, expiresAt },
+    { mode: 'direct', url, token, contentType, size: meta.size, expiresAt },
     {
       // This body contains a live credential. It must never be written to a
       // disk cache, a shared proxy, or a browser's back-forward store.

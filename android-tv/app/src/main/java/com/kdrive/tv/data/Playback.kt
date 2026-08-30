@@ -147,7 +147,14 @@ private fun streamingDataSourceFactory(
     // request properties — set once, sent on every request the factory makes —
     // so attaching them here would hand our shared secret to Google on every
     // range request of every film. Only the proxy path gets them.
-    if (!source.direct) {
+    if (source.direct) {
+        // Google's own token, and only Google's. It is what authenticates the
+        // read: alt=media refuses an unauthenticated request, and refuses one
+        // that carries the token as a query parameter too, so the header is
+        // the only way in. Set as a default as well as per connection so the
+        // first open is authenticated even before the resolver below runs.
+        http.setDefaultRequestProperties(source.requestHeaders())
+    } else {
         http.setDefaultRequestProperties(api(context)?.authHeaders() ?: emptyMap())
     }
 
@@ -169,7 +176,15 @@ private fun streamingDataSourceFactory(
             // A refusal to resolve must not kill playback: keeping the spec
             // as it is retries the URL in hand, which is still valid whenever
             // the failure was the network rather than the token.
-            if (fresh != null && fresh.direct) dataSpec.withUri(Uri.parse(fresh.url)) else dataSpec
+            if (fresh != null && fresh.direct) {
+                // Both halves travel together: the token is what expires, and
+                // the header carrying it is what the request is served on.
+                dataSpec
+                    .withUri(Uri.parse(fresh.url))
+                    .withRequestHeaders(fresh.requestHeaders())
+            } else {
+                dataSpec
+            }
         }
     } else {
         http
