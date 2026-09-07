@@ -8,6 +8,9 @@
 import { requireDeviceOrSession } from '@/lib/auth.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function GET(request) {
   const authError = await requireDeviceOrSession(request);
   if (authError) return authError;
@@ -29,6 +32,10 @@ export async function GET(request) {
           // each item's detail just to render one paragraph.
           description: 1,
           status: 1,
+          filename: 1,
+          size: 1,
+          driveFileId: 1,
+          seekIndex: 1,
           createdAt: 1,
         },
       }

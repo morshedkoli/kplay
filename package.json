@@ -11,6 +11,7 @@
     "migrate": "node lib/migrations/001-indexes.js",
     "apk:stage": "node scripts/stage-apk.js",
     "apk:build": "node scripts/stage-apk.js --build",
+    "index:mkv": "node scripts/index-mkv.mjs",
     "test": "node --test \"lib/**/*.test.js\"",
     "test:db": "node scripts/test-db.js",
     "test:gdrive": "node scripts/test-gdrive.js",
