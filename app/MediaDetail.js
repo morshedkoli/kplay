@@ -11,6 +11,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { localDrivePath } from '@/lib/drive-url.js';
 
 const PROGRESS_POST_INTERVAL_SECONDS = 10;
 
@@ -34,8 +35,39 @@ export default function MediaDetail({ id }) {
   const [resumeSeconds, setResumeSeconds] = useState(0);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [swReady, setSwReady] = useState(false);
   const videoRef = useRef(null);
   const lastPostedRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    let active = true;
+    if (navigator.serviceWorker.controller) {
+      setSwReady(true);
+    }
+
+    const onControllerChange = () => {
+      if (active) setSwReady(true);
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+
+    navigator.serviceWorker
+      .register('/drive-sw.js')
+      .then(() => {
+        if (navigator.serviceWorker.controller && active) {
+          setSwReady(true);
+        }
+      })
+      .catch((err) => {
+        console.error('drive worker registration failed', err);
+      });
+
+    return () => {
+      active = false;
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+    };
+  }, []);
 
   const isSeries = item?.type === 'series';
   // Back link follows the item's own type, so a /movies/[id] URL that turns
@@ -214,22 +246,28 @@ export default function MediaDetail({ id }) {
                 {playingEpisode.title ? ` — ${playingEpisode.title}` : ''}
               </p>
             ) : null}
-            <video
-              ref={videoRef}
-              key={playingId}
-              src={`/api/media/stream/${playingId}`}
-              poster={posterUrl || undefined}
-              controls
-              autoPlay
-              preload="auto"
-              onLoadedMetadata={() => {
-                if (resumeSeconds > 5 && videoRef.current) {
-                  videoRef.current.currentTime = resumeSeconds;
-                }
-              }}
-              onTimeUpdate={postProgress}
-              className="mb-6 w-full rounded-xl bg-black"
-            />
+            {swReady ? (
+              <video
+                ref={videoRef}
+                key={playingId}
+                src={localDrivePath(isSeries ? playingEpisode?.driveFileId : item?.driveFileId)}
+                poster={posterUrl || undefined}
+                controls
+                autoPlay
+                preload="auto"
+                onLoadedMetadata={() => {
+                  if (resumeSeconds > 5 && videoRef.current) {
+                    videoRef.current.currentTime = resumeSeconds;
+                  }
+                }}
+                onTimeUpdate={postProgress}
+                className="mb-6 w-full rounded-xl bg-black"
+              />
+            ) : (
+              <div className="mb-6 flex h-64 w-full items-center justify-center rounded-xl bg-black text-sm text-[var(--ink-soft)]">
+                Preparing player...
+              </div>
+            )}
           </>
         ) : null}
 

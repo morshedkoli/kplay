@@ -18,16 +18,15 @@
 // direct is a server-side decision that changes with configuration, and a
 // client that hardcoded it would break silently.
 //
-// WHY BROWSERS NEVER GET 'direct': Drive serves these files as
-// application/octet-stream with X-Content-Type-Options: nosniff and no
-// Access-Control-Allow-Origin. A <video> element refuses them both with and
-// without `crossorigin`. Only a native player (ExoPlayer on the Android TV
-// client), which is not bound by CORS and reads the bytes to pick an
-// extractor, can use a direct URL at all.
+// BROWSERS AND DIRECT PLAY: Drive answers Bearer-authenticated Range requests
+// with Access-Control-Allow-Origin and 206 Partial Content (verified
+// 2026-09-07). A Service Worker intercepts /drive/<fileId> requests from
+// <video> elements and attaches Authorization: Bearer, allowing browsers to
+// play directly from Drive without proxying bytes through this deployment.
 
 import { ObjectId } from 'mongodb';
 
-import { hasDeviceKey, requireDeviceOrSession } from '@/lib/auth.js';
+import { requireDeviceOrSession } from '@/lib/auth.js';
 import { getAccessToken, getFileMetadata } from '@/lib/gdrive.js';
 import { videoContentType } from '@/lib/library/video-types.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
@@ -84,9 +83,6 @@ async function resolveDriveFileId(id) {
  * broken, and this is the field that tells them apart in the logs.
  */
 function proxyReason(request, meta) {
-  // A browser session, not a device key. See the CORS note at the top.
-  if (!hasDeviceKey(request)) return 'browser-client';
-
   const allowed = directContainers();
   if (allowed.size === 0) return 'direct-play-disabled';
 
