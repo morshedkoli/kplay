@@ -14,6 +14,8 @@
 // password in front of it, so nothing behind that password — counts, titles,
 // storage, configuration — is rendered for a visitor who has not signed in.
 
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import Link from 'next/link';
 
 import { isAdmin } from '@/lib/admin-auth.js';
@@ -63,15 +65,38 @@ const STACK = [
   ['Auth', 'One admin password for the browser, one shared device key for the TV app.'],
 ];
 
+async function getApkInfo() {
+  const metaPath = join(process.cwd(), 'assets/android-tv/metadata.json');
+  const apkPath = join(process.cwd(), 'assets/android-tv/kplay-tv.apk');
+  try {
+    const [metaRaw, apkStat] = await Promise.all([
+      readFile(metaPath, 'utf8').catch(() => null),
+      stat(apkPath).catch(() => null),
+    ]);
+    if (!apkStat) return null;
+    const meta = metaRaw ? JSON.parse(metaRaw) : {};
+    return {
+      sizeBytes: apkStat.size,
+      versionName: meta.versionName ?? null,
+      builtAt: meta.builtAt ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default async function HomePage() {
   const admin = await isAdmin();
-  const overview = admin ? await getOverview() : null;
+  const [overview, apkInfo] = await Promise.all([
+    admin ? getOverview() : null,
+    admin ? getApkInfo() : null,
+  ]);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-14 sm:py-20">
       <Hero admin={admin} />
 
-      {admin && overview ? <Dashboard overview={overview} /> : null}
+      {admin && overview ? <Dashboard overview={overview} apkInfo={apkInfo} /> : null}
 
       <Section title="How it works" id="how-it-works">
         <div className="grid gap-4 sm:grid-cols-3">
@@ -200,7 +225,7 @@ function Card({ children }) {
 
 /* ── the signed-in half ─────────────────────────────────────────────────── */
 
-function Dashboard({ overview }) {
+function Dashboard({ overview, apkInfo }) {
   const { stats, statsError, usage, usageError, recent, configuration } = overview;
 
   return (
@@ -228,6 +253,40 @@ function Dashboard({ overview }) {
 
       <Section title="Drive storage">
         {usage ? <Usage usage={usage} /> : <Problem>Drive unreachable{usageError ? `: ${usageError}` : ''}</Problem>}
+      </Section>
+
+      <Section title="Android TV client">
+        <div className="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-[var(--ink)]">Android TV App (APK)</h3>
+              {apkInfo?.versionName ? (
+                <span className="rounded-full bg-[var(--surface-raised)] px-2.5 py-0.5 text-xs font-medium text-[var(--accent)]">
+                  v{apkInfo.versionName}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">
+              Direct-play native client for Android TV with D-pad browse, Media3 caching, audio-track selection, and Range requests directly from Drive.
+            </p>
+            {apkInfo?.sizeBytes ? (
+              <p className="mt-2 text-xs text-[var(--ink-soft)]/70">
+                Size: {formatBytes(apkInfo.sizeBytes)}{apkInfo.builtAt ? ` · Built: ${formatDate(apkInfo.builtAt)}` : ''}
+              </p>
+            ) : null}
+          </div>
+          <a
+            href="/api/apk"
+            download
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-90"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v11m0 0 4-4m-4 4-4-4" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            </svg>
+            Download APK
+          </a>
+        </div>
       </Section>
 
       <Section title="Server status">
