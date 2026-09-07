@@ -8,6 +8,7 @@ import { ObjectId } from 'mongodb';
 import { requireDeviceOrSession } from '@/lib/auth.js';
 import { deleteFile } from '@/lib/gdrive.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
+import { validateMediaPatch } from '@/lib/library/edit.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -102,4 +103,38 @@ export async function DELETE(request, { params }) {
 
   await media.deleteOne({ _id: doc._id });
   return Response.json({ ok: true });
+}
+
+export async function PATCH(request, { params }) {
+  const authError = await requireDeviceOrSession(request);
+  if (authError) return authError;
+
+  const { id } = await params;
+
+  let _id;
+  try {
+    _id = new ObjectId(id);
+  } catch (err) {
+    return Response.json({ error: 'Invalid id' }, { status: 400 });
+  }
+
+  let patch;
+  try {
+    patch = await request.json();
+  } catch (err) {
+    return Response.json({ error: 'Expected a JSON body' }, { status: 400 });
+  }
+
+  const media = await mediaCollection();
+  const current = await media.findOne({ _id });
+  if (!current) return Response.json({ error: 'Not found' }, { status: 404 });
+
+  const episodes = await episodeCollection();
+  const episodeCount = await episodes.countDocuments({ mediaId: _id });
+
+  const checked = validateMediaPatch(patch, current, episodeCount);
+  if (!checked.ok) return Response.json({ error: checked.error }, { status: 400 });
+
+  await media.updateOne({ _id }, { $set: checked.update });
+  return Response.json({ ok: true, ...checked.update });
 }
