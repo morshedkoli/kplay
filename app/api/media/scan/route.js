@@ -11,6 +11,7 @@ import { requireDeviceOrSession } from '@/lib/auth.js';
 import { listFolderFiles } from '@/lib/gdrive.js';
 import { isVideoFile } from '@/lib/library/video-types.js';
 import { matchAndStore, rematchUnmatchedMovies } from '@/lib/library/match.js';
+import { takePage } from '@/lib/library/scan-page.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 
 export const runtime = 'nodejs';
@@ -41,13 +42,18 @@ export async function POST(request) {
   const known = await knownDriveFileIds();
   const pending = files.filter((f) => isVideoFile(f) && !known.has(f.driveFileId));
 
+  // A large folder cannot be matched in one invocation, so the panel walks it
+  // a page at a time and this route reports where to resume.
+  const cursor = new URL(request.url).searchParams.get('cursor');
+  const { page, nextCursor } = takePage(pending, cursor);
+
   const imported = [];
   const failed = [];
 
   // Sequential on purpose: TMDb rate-limits, and series episodes must be
   // matched one at a time or two episodes of the same show race to create
   // duplicate parent docs.
-  for (const file of pending) {
+  for (const file of page) {
     try {
       const result = await matchAndStore({
         filename: file.name,
@@ -78,5 +84,7 @@ export async function POST(request) {
     imported,
     rematched,
     failed,
+    nextCursor,
+    remaining: pending.length - page.length,
   });
 }
