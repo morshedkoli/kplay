@@ -147,10 +147,12 @@ and no proxy remains to fall back to.
 `googleapis.com/drive/v3/files/{id}?alt=media` returns
 `Access-Control-Allow-Origin` for a Bearer-authenticated cross-origin fetch.
 The comment at `app/api/media/play-url/[id]/route.js:20-26` asserts it does not,
-but that conclusion was drawn from the rejected `?access_token=` form. If the
-assertion holds after retesting, browser playback stays proxy-shaped and the
-browser half of this section is dropped; the TV path and every other section are
-unaffected.
+but that conclusion was drawn from the rejected `?access_token=` form. Retested
+on 2026-09-07: Drive successfully answered the preflight OPTIONS with status 200
+and returned status 206 Partial Content (1024 bytes) with `Access-Control-Allow-Origin`
+and `Access-Control-Allow-Credentials: true` for a Bearer-authenticated Range request.
+Browser direct play is reachable.
+
 
 ### 4. Ingest
 
