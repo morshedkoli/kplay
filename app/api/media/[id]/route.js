@@ -9,6 +9,9 @@ import { requireDeviceOrSession } from '@/lib/auth.js';
 import { deleteFile } from '@/lib/gdrive.js';
 import { episodeCollection, mediaCollection } from '@/lib/models/media.js';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function GET(request, { params }) {
   const authError = await requireDeviceOrSession(request);
   if (authError) return authError;
